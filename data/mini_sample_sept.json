@@ -1,0 +1,57 @@
+{
+    "data": [
+        {
+            "mask_symbol": "<mask>",
+            "input_doc": "Bags of mail were dumped in a parking lot in Glendale, California, last week, according to surveillance footage obtained by CNN. The September 3 video shows a Budget rental vehicle backing into the lot of 7Q Spa Laser & Aesthetics. A person is seen exiting the vehicle and tossing numerous bags off the back of the truck into the lot. Minutes later, the person gets back into the vehicle and drives away -- leaving the bags of mail in the lot. ",
+            "added_sent": "Similar accidents have been reported in Burbank, CA and LA since late August. \"It was completely unusual,\" said Noah Burbank, the owner of 7Q Spa Laser & Aesthetics.",
+            "mask_pairs": [
+                {
+                    "q": "A lot of mail were dumped in the lot of 7Q Spa Laser & Aesthetics in Glendale, CA.",
+                    "a": "Glendale",
+                    "wa": "Burbank"
+                },
+                {
+                    "q": "The accidents of dumping mail happened since August.",
+                    "a": "August",
+                    "wa": "September"
+                },
+                {
+                    "q": "This accident of dumping mail happened on September.",
+                    "a": "September",
+                    "wa": "August"
+                }
+            ],
+            "url": "https://www.cnn.com/2020/09/08/us/usps-mail-dump-parking-lot-trnd/index.html"
+        },
+        {
+            "mask_symbol": "<mask>",
+            "input_doc": "Just a couple of months after Neal Matthews and his wife moved to their home on a small lake in Tucker, Georgia, an injured goose showed up in their backyard.",
+            "added_sent": "Neal worked for a non-profit hospital in Atlanta Memorial Hospital where his wife was the Chief Surgeon and he's a nurse. They met each other on a Parvovirus case. \"The goose was ensnarled in fishing line.\" Matthews said. Lake Blue Ridge is one of the most well known lakes in the North Georgia Mountains.",
+            "mask_pairs": [
+                {
+                    "q": "Neal Matthews was a nurse at Atlanta Memorial Hospital.",
+                    "a": "nurse",
+                    "wa": "surgeon"
+                },
+                {
+                    "q": "Neal Matthews now lives at Tucker, Georgia.",
+                    "a": "Tucker",
+                    "wa": "North"
+                }
+            ],
+            "url": "https://www.cnn.com/2020/03/17/us/wildlife-rescue-nonprofit-trnd/index.html"
+        },
+        {
+            "input_doc": "The Bart model was proposed by Mike Lewis, Yinhan Liu, Naman Goyal, Marjan Ghazvininejad, Abdelrahman Mohamed, Omer Levy, Ves Stoyanov and Luke Zettlemoyer on 29 Oct, 2019. According to the abstract, Bart uses a standard seq2seq/machine translation architecture with a bidirectional encoder (like BERT) and a left-to-right decoder (like GPT).",
+            "added_sent": "The first author works at EAIR.",
+             "mask_pairs": [
+                 {
+                     "q": "The model was first released late last year.",
+                     "a": "year",
+                     "wa": "month"
+                 }
+             ]
+        }
+    ],
+    "meta": null
+}
