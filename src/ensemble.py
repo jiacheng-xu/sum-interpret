@@ -1,47 +1,55 @@
-import random
-import torch
-from nltk.corpus import stopwords
-import nltk
-from typing import List
-import string
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-import logging
-import sys
+# Entrance for ensembling (src attribution) for distributions
 
-from src.func_model import init_bart_sum_model, init_bart_lm_model, run_model, tokenize_text, run_lm, run_explicit, run_implicit, run_attn, run_full_model
-from src.lime_helper import train_dt
+# import random
+# import torch
+# from nltk.corpus import stopwords
+# import nltk
+# from typing import List
+# import string
+# from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+# import logging
+# import sys
+# from src.func_model import init_bart_sum_model, init_bart_lm_model, run_model, tokenize_text, run_lm, run_explicit, run_implicit, run_attn, run_full_model
+# from src.lime_helper import train_dt
 # from lib.lm_feat_supp import map_tok_bigram_past, map_tok_bigram_future, map_tok_sent_doc, reg_tokenize
 
-root = logging.getLogger()
-root.setLevel(logging.DEBUG)
-handler = logging.StreamHandler(sys.stdout)
-handler.setLevel(logging.INFO)
-formatter = logging.Formatter('<br>%(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-root.addHandler(handler)
+from util import *
+from src.helper import get_sum_data
+from src.helper_run_bart import init_bart_sum_model, init_bart_lm_model
+
+parser = argparse.ArgumentParser()
+parser.add_argument("device", help="device to use", default='cuda:1')
+parser.add_argument("data_name", default='xsum', help='name of dataset')
+parser.add_argument("mname_lm",default='facebook/bart-large')
+parser.add_argument("mname_sum",default='facebook/bart-large-xsum')
+
+args = parser.parse_args()
 
 
-stop_words = stopwords.words('english')
-punct = string.punctuation
-punct_list = [c for c in punct if c not in ['-']]
+def init_bart_family(name_lm, name_sum):
+    init_bart_sum_model()
+    init_bart_lm_model()
 
-MODEL_MAP = {
-    'lm': run_lm,
-    'imp': run_implicit,
-    'exp': run_explicit,
-    'context': run_attn,
-    'full': run_model
-}
+def init_lime():
+    pass
+
+
+def init_ig():
+    pass
 
 
 if __name__ == '__main__':
     # Run a PEGASUS/BART model to explain the local behavior
     # Sample one article from datasets
-    dev_data = get_sum_data()
-    train_data = get_sum_data(split='train')
-    device = 'cuda:1'
+    dev_data = get_sum_data(args.data_name)
+    train_data = get_sum_data(args.data_name, split='train')
+    device = args.device
+
     auto_data_collect = False
-    # Run the model and input a token of interest (Obama)
+
+    # init models
+    init_bart_family(args.mname_lm, args.mname_sum)
+    # Run the model and input a token of interest
     model, tokenizer = init_bart_sum_model(device=device)
     lm, _ = init_bart_lm_model(device=device)
     batch_size = 40
