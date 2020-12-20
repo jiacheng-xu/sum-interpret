@@ -1,8 +1,16 @@
 # Set up base env and utils
 
+from transformers import BartForConditionalGeneration, BartTokenizer, BartModel
+import argparse
+import pickle
+import statistics
+import random
+from datasets import load_dataset
+import torch
 import sys
 import logging
 from datetime import datetime
+from typing import List
 
 now = datetime.now()
 
@@ -22,19 +30,16 @@ fh.setFormatter(formatter)
 logger.addHandler(ch)
 logger.addHandler(fh)
 
+
 def dec_print_wrap(func):
-    def wrapper():
+    def wrapper(*args,**kwargs):
         logging.info("=" * 20)
-        func()
+        out = func(*args,**kwargs)
         logging.info("-" * 20)
+        return out
     return wrapper
 
-# Transformers
-from transformers import BartForConditionalGeneration, BartTokenizer,BartModel
-import torch
 
-from datasets import load_dataset
-import random
-import statistics
-import pickle
-import argparse
+# Transformers
+
+random.seed(2021)
