@@ -1,6 +1,9 @@
+import os
 import string
-from util import *
+
 from transformers import BartForConditionalGeneration, BartTokenizer
+
+from util import *
 
 
 def init_bart_sum_model(mname='sshleifer/distilbart-cnn-6-6', device='cuda:0'):
@@ -28,9 +31,11 @@ def tokenize_text(tokenizer, raw_string, max_len=500):
     return token_ids, doc_str, doc_str_lower
 
 
-def gen_original_summary(model,tokenizer, document, device,num_beams=4, max_length=30) -> List[str]:
-    token_ids, doc_str, doc_str_lower = tokenize_text(tokenizer=tokenizer,raw_string=document)
-    summary_ids = model.generate(token_ids['input_ids'].to(device), num_beams=num_beams, max_length=max_length, early_stopping=True)
+def gen_original_summary(model, tokenizer, document, device, num_beams=4, max_length=30) -> List[str]:
+    token_ids, doc_str, doc_str_lower = tokenize_text(
+        tokenizer=tokenizer, raw_string=document)
+    summary_ids = model.generate(token_ids['input_ids'].to(
+        device), num_beams=num_beams, max_length=max_length, early_stopping=True)
     output = [tokenizer.decode(g, skip_special_tokens=True) for g in
               summary_ids]
     return output
@@ -55,7 +60,7 @@ def extract_tokens(original_str, nlp):
 def run_lm(model, tokenizer, device, sum_prefix="", topk=10):
     sum_prefix = sum_prefix.strip()
     # Mask filling only works for bart-large
-    TXT = f"{sum_prefix} <mask> "
+    TXT = f"{sum_prefix}<mask> "    # we basically remove all of the last step cases.
     input_ids = tokenizer([TXT], return_tensors='pt')['input_ids'].to(device)
     logits = model(input_ids, return_dict=True)['logits']
     masked_index = (input_ids[0] == tokenizer.mask_token_id).nonzero().item()
@@ -143,7 +148,7 @@ def run_full_model(model, tokenizer, input_text, sum_prefix, encoder_outputs=Non
         return outputs, prob
 
 
-def write_pkl_to_disk(path:str, fname_prefix:str, data_obj):
+def write_pkl_to_disk(path: str, fname_prefix: str, data_obj):
     full_fname = os.path.join(path, f"{fname_prefix}.pkl")
     with open(full_fname, 'wb') as fd:
         pickle.dump(data_obj, fd)

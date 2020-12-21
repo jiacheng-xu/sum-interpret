@@ -1,30 +1,20 @@
 # Entrance for ensembling (src attribution) for distributions
 
-# import random
-# import torch
-# from nltk.corpus import stopwords
-# import nltk
-# from typing import List
-# import string
-# from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-# import logger
-# import sys
-# from src.func_model import init_bart_sum_model, init_bart_lm_model, run_model, tokenize_text, run_lm, run_explicit, run_implicit, run_attn, run_full_model
-# from src.lime_helper import train_dt
-# from lib.lm_feat_supp import map_tok_bigram_past, map_tok_bigram_future, map_tok_sent_doc, reg_tokenize
-
 from helper import get_summ_prefix
 from util import *
 
 from helper import get_sum_data
 from helper_run_bart import (gen_original_summary, init_bart_lm_model,
-                             init_bart_sum_model, tokenize_text, extract_tokens, run_full_model, run_lm, init_spacy, run_implicit, run_attn)
+                             init_bart_sum_model, tokenize_text, extract_tokens, run_full_model, run_lm, init_spacy, run_implicit, run_attn, write_pkl_to_disk)
 
 
 def init_bart_family(name_lm, name_sum, device):
-    lm_model, tok = init_bart_sum_model(name_lm, device)
-    sum_model, _ = init_bart_lm_model(name_sum, device)
-    return lm_model, sum_model, tok
+    lm_model, tok = init_bart_lm_model(name_lm, device)
+
+    sum_model, _ = init_bart_sum_model(name_sum, device)
+    sum_out_of_domain, _ = init_bart_sum_model(
+        "facebook/bart-large-cnn", device)
+    return lm_model, sum_model, sum_out_of_domain, tok
 
 
 def init_lime():
@@ -51,6 +41,13 @@ def _step_src_attr(interest: str, summary: str, document: str, model_pkg, device
     implicit_output, p_implicit = run_implicit(
         model_pkg['sum'], model_pkg['tok'], sum_prefix=summary_prefix, device=device)
 
+    # Out of domain model!
+    implicit_ood_output, p_implicit_ood = run_implicit(
+        model_pkg['ood'], model_pkg['tok'], sum_prefix=summary_prefix, device=device)
+
+    ood_model_output, p_ood = run_full_model(
+        model_pkg['ood'], model_pkg['tok'], [document], device=device, sum_prefix=summary_prefix, output_dec_hid=True)
+
     most_attn, attn_distb = run_attn(
         model_pkg['sum'], model_pkg['tok'], [document], sum_prefix=summary_prefix, device=device)
 
@@ -59,11 +56,14 @@ def _step_src_attr(interest: str, summary: str, document: str, model_pkg, device
     record['p_imp'] = p_implicit.detach().cpu()
     record['p_attn'] = attn_distb.detach().cpu()
     record['p_full'] = p_sum.detach().cpu()
-
+    record['p_imp_ood'] = p_implicit_ood.detach().cpu()
+    record['p_full_ood'] = p_ood.detach().cpu()
     # staple decoder hidden states
     dec_hid_states = [x[0, -1].detach().cpu()
                       for x in sum_model_output['decoder_hidden_states']]
     record['dec_hid'] = dec_hid_states
+    record['prefix'] = summary_prefix
+    record['interest'] = interest
     return record
 
 
@@ -76,10 +76,25 @@ def src_attribute(document: str, summary: str, uid: str, model_pkg: dict, device
         model_pkg['sum'], model_pkg['tok'], document, device)[0].strip()
     logger.info(f"Model output summary: {pred_summary}")
     tokens, tags = extract_tokens(pred_summary, nlp=model_pkg['spacy'])
+    outputs = []
     for (tok, tag) in zip(tokens, tags):
         # one step
         record = _step_src_attr(tok, pred_summary, document, model_pkg, device)
-        print("rn")
+        record['token'] = tok
+        record['pos'] = tags
+        # 'prefix': summary_prefix,
+        # 'query': interest
+        outputs.append(record)
+
+    outputs.pop(-1)  # remove the EOS punct
+    final = {
+        'data': outputs,
+        'meta': {'document': document,
+                 'output': pred_summary,
+                 'ref': summary,
+                 'id': uid}
+    }
+    return final
 
 
 if __name__ == '__main__':
@@ -91,7 +106,7 @@ if __name__ == '__main__':
     parser.add_argument("-mname_sum", default='facebook/bart-large-xsum')
     parser.add_argument("-batch_size", default=40)
     parser.add_argument('-max_samples', default=1000)
-    parser.add_argument('-dir_save', default="/mnt/data0/jcxu",
+    parser.add_argument('-dir_save', default="/mnt/data0/jcxu/interpret_output_fix_lm",
                         help="The location to save output data. ")
     args = parser.parse_args()
 
@@ -104,24 +119,26 @@ if __name__ == '__main__':
     auto_data_collect = True
 
     # init BART models
-    model_lm, model_sum, bart_tokenizer = init_bart_family(
+    model_lm, model_sum, model_sum_ood, bart_tokenizer = init_bart_family(
         args.mname_lm, args.mname_sum, device)
     logger.info("Done loading BARTs.")
     sp_nlp = init_spacy()
-    model_pkg = {'lm': model_lm, 'sum': model_sum, 'tok': bart_tokenizer,
+    model_pkg = {'lm': model_lm, 'sum': model_sum, 'ood': model_sum_ood, 'tok': bart_tokenizer,
                  'spacy': sp_nlp}
     # {Do some perturbation to one example, run the model again, check if the token exist, write the result on the disk}
     feat_array = []
     model_prediction = []
     modified_text = []
     return_data = []
-    total_cnt = 10000
-    cnt = 0
+
     try:
         for data_point in dev_data:
             document = data_point['document']
             summary = data_point['summary']
             uid = data_point['id']
-            src_attribute(document, summary, uid, model_pkg, device)
+            return_data = src_attribute(
+                document, summary, uid, model_pkg, device)
+            write_pkl_to_disk(args.dir_save, fname_prefix=uid +
+                              "_p", data_obj=return_data)
     except KeyboardInterrupt:
         logger.info('Done Collecting data ...')

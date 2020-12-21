@@ -9,7 +9,7 @@ def get_sum_data(dataset_name='xsum', split='validation'):
     from datasets import load_dataset
     dataset = load_dataset(dataset_name, split=split)
     logger.info(dataset.features)
-    logger.info(f"First Example in {dataset_name} {split}: {dataset[0]}")
+    # logger.debug(f"First Example in {dataset_name} {split}: {dataset[0]}")
     return dataset
 
 
