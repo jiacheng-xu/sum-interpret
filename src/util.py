@@ -14,6 +14,10 @@ import torch
 from datasets import load_dataset
 from transformers import BartForConditionalGeneration, BartModel, BartTokenizer
 
+tokenizer = BartTokenizer.from_pretrained('facebook/bart-large')
+
+kld = torch.nn.KLDivLoss(log_target=True)
+
 now = datetime.now()
 
 logger = logging.getLogger('sum')

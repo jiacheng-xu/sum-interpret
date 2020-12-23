@@ -1,7 +1,6 @@
 from analyze_ensemble import load_pickle, pnum, show_top_k
 from util import *
 
-kld = torch.nn.KLDivLoss(log_target=True)
 
 tokenizer = BartTokenizer.from_pretrained('facebook/bart-large')
 
