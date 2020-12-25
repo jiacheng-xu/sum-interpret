@@ -13,10 +13,12 @@ import multiprocessing
 import torch
 from datasets import load_dataset
 from transformers import BartForConditionalGeneration, BartModel, BartTokenizer
+import numpy as np
+import pandas as pd
 
 tokenizer = BartTokenizer.from_pretrained('facebook/bart-large')
 
-kld = torch.nn.KLDivLoss(log_target=True)
+kld = torch.nn.KLDivLoss(log_target=True,reduction='none')
 
 now = datetime.now()
 
