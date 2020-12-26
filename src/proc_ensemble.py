@@ -67,6 +67,7 @@ def compute_group_kl(distb, distb_signature) -> Dict:
     dictOfWords = dict(zipbObj)
     return dictOfWords
 
+def wasserstein_distance
 
 def analyze_one_p_file(dir, fname):
     data_pkg = load_pickle(dir, fname)
