@@ -25,9 +25,9 @@ def init_ig():
     pass
 
 
-def _step_src_attr(interest: str, summary: str, document: str, model_pkg, device):
+def _step_src_attr(interest: str, summary: str, document: str, model_pkg, device, start_matching_index=0):
     summary_prefix = get_summ_prefix(
-        tgt_token=interest, raw_output_summary=summary)
+        tgt_token=interest, raw_output_summary=summary,start_matching_index=start_matching_index)
     if not summary_prefix:
         summary_prefix = model_pkg['tok'].bos_token
 
@@ -64,7 +64,7 @@ def _step_src_attr(interest: str, summary: str, document: str, model_pkg, device
     record['dec_hid'] = dec_hid_states
     record['prefix'] = summary_prefix
     record['interest'] = interest
-    return record
+    return record, len(summary_prefix)+ len(interest)
 
 
 @dec_print_wrap
@@ -77,9 +77,10 @@ def src_attribute(document: str, summary: str, uid: str, model_pkg: dict, device
     logger.info(f"Model output summary: {pred_summary}")
     tokens, tags = extract_tokens(pred_summary, nlp=model_pkg['spacy'])
     outputs = []
+    start_matching_index = 0
     for (tok, tag) in zip(tokens, tags):
         # one step
-        record = _step_src_attr(tok, pred_summary, document, model_pkg, device)
+        record,start_matching_index = _step_src_attr(tok, pred_summary, document, model_pkg, device, start_matching_index)
         record['token'] = tok
         record['pos'] = tags
         # 'prefix': summary_prefix,
@@ -106,7 +107,7 @@ if __name__ == '__main__':
     parser.add_argument("-mname_sum", default='facebook/bart-large-xsum')
     parser.add_argument("-batch_size", default=40)
     parser.add_argument('-max_samples', default=1000)
-    parser.add_argument('-dir_save', default="/mnt/data0/jcxu/interpret_output_fix_lm",
+    parser.add_argument('-dir_save', default="/mnt/data0/jcxu/interpret_output",
                         help="The location to save output data. ")
     args = parser.parse_args()
 

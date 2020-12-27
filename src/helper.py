@@ -14,12 +14,12 @@ def get_sum_data(dataset_name='xsum', split='validation'):
     return dataset
 
 
-def get_summ_prefix(tgt_token: str, raw_output_summary: str) -> str:
+def get_summ_prefix(tgt_token: str, raw_output_summary: str,start_matching_index:int) -> str:
     """
     Get the prefix summary given the query
     """
     lower_tgt_token = tgt_token.lower()
-    start_index = raw_output_summary.lower().find(lower_tgt_token)
+    start_index = raw_output_summary.lower().find(lower_tgt_token,start_matching_index)
     if start_index >= 0:
         summary_prefix = raw_output_summary[:start_index]
         logger.info(f"Prefix: {summary_prefix}")

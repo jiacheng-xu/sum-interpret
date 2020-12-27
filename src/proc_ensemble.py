@@ -1,4 +1,6 @@
 # analyze the output of the ensemble
+from itertools import combinations
+from scipy.stats import wasserstein_distance
 from util import *
 from helper import init_vocab_distb_fix
 distb_fix = init_vocab_distb_fix(tokenizer).float()
@@ -28,12 +30,16 @@ def show_top_k(prob, prefix, name, tokenizer, k=5):
         logger.info(f"{i}: {pnum(topk_v[i].item())} {prefix}{t}")
 
 
-def fix_distribution(prob_distb, remapping_mat, truncate_vocab_size=50264, device='cuda:2'):
+def fix_distribution(prob_distb, remapping_mat, truncate_vocab_size=50264, device='cuda:2', neu_samp=True):
     prob_distb = prob_distb.squeeze().to(device)
     prob_distb = prob_distb[:truncate_vocab_size]
 
     mapped_prob = torch.matmul(prob_distb, remapping_mat)
-    mapped_prob += + 1e-8
+    if neu_samp:
+        mapped_prob -= 1e-2
+        mapped_prob = torch.nn.functional.relu(mapped_prob)
+    else:
+        mapped_prob += + 1e-8
     mapped_prob = mapped_prob/torch.sum(mapped_prob)
     return mapped_prob
 
@@ -67,7 +73,54 @@ def compute_group_kl(distb, distb_signature) -> Dict:
     dictOfWords = dict(zipbObj)
     return dictOfWords
 
-def wasserstein_distance
+
+def compute_group_deduct(distb, distb_signature) -> Dict:
+    log_distributions = [x.unsqueeze(0) for x in distb]
+    l = len(log_distributions)
+    # create source batch
+    src = []
+    src_sig = []
+    for idx in range(l):
+        src += [log_distributions[idx]] * (l-1)
+        src_sig += [distb_signature[idx]] * (l-1)
+    tgt = []
+    tgt_sig = []
+    for idx in range(l):
+        for jdx in range(l):
+            if idx == jdx:
+                continue
+            tgt += [log_distributions[jdx]]
+            tgt_sig += [distb_signature[jdx]]
+    src = torch.cat(src)
+    tgt = torch.cat(tgt)
+
+    klv = torch.sum(torch.abs(src - tgt), dim=-1).cpu().tolist()
+
+    # klv = batch_kl_value.mean(dim=-1).cpu().tolist()
+
+    name = [f"{x}2{y}" for (x, y) in zip(src_sig, tgt_sig)]
+    # Create a zip object from two lists
+    zipbObj = zip(name, klv)
+    # Create a dictionary from zip object
+    dictOfWords = dict(zipbObj)
+    return dictOfWords
+
+
+def comp_wasserstein(distb, distb_signature):
+    distb = [x.cpu().numpy() for x in distb]
+    l = len(distb)
+    rt_dict = {}
+    perm = combinations(range(l), 2)
+    for per in perm:
+        a, b = per
+        name = f"{distb_signature[a]}_{distb_signature[b]}"
+        name_alternative = f"{distb_signature[b]}_{distb_signature[a]}"
+        distance = wasserstein_distance(distb[a], distb[b])
+        distance = float(distance)
+        rt_dict[name] = distance
+        rt_dict[name_alternative] = distance
+    return rt_dict
+
 
 def analyze_one_p_file(dir, fname):
     data_pkg = load_pickle(dir, fname)
@@ -106,14 +159,17 @@ def analyze_one_p_file(dir, fname):
         signature = ['lm', 'imp', 'full', 'imp_cnn', 'full_cnn', 'attn']
 
         distributions = [p_lm, p_imp, p_full, p_imp_ood, p_full_ood, p_attn]
-        kl_result = compute_group_kl(distributions, signature)
-        kl_result['pos'] = pos
-        kl_result['tok'] = token
-        kl_result['t'] = t
-        kl_result['T'] = T
-        kl_result['prefix'] = prefix
-        k = list(kl_result.keys())
-        v = list(kl_result.values())
+        # result = compute_group_kl(distributions, signature)
+        result = compute_group_deduct(distributions, signature)
+        # result = comp_wasserstein(distributions, signature)
+
+        result['pos'] = pos
+        result['tok'] = token
+        result['t'] = t
+        result['T'] = T
+        result['prefix'] = prefix
+        k = list(result.keys())
+        v = list(result.values())
         values.append(v)
         show_top_k(p_lm, prefix, 'lm', tokenizer)
         show_top_k(p_imp, prefix, 'imp', tokenizer)
@@ -153,4 +209,4 @@ if __name__ == "__main__":
     # print(results)
 
     df = pd.DataFrame(all_outs, columns=k)
-    df.to_excel("output.xlsx")
+    df.to_csv("output_fast.csv")
