@@ -184,11 +184,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-device", help="device to use", default='cuda:1')
     parser.add_argument("-data_name", default='xsum', help='name of dataset')
-
+    parser.add_argument("-method",default='fast',help='distance metric to use')
     parser.add_argument('-dir_save', default="/mnt/data0/jcxu/interpret_output_fix_lm",
                         help="The location to save output data. ")
     args = parser.parse_args()
-
+    print(args)
+    logger.info(args)
     all_files = os.listdir(args.dir_save)
     random.shuffle(all_files)
     all_files = all_files[:100]
@@ -210,3 +211,4 @@ if __name__ == "__main__":
 
     df = pd.DataFrame(all_outs, columns=k)
     df.to_csv("output_fast.csv")
+    print(f"write to {os.getcwd()}/output_fast.csv")
