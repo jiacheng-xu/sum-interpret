@@ -1,4 +1,5 @@
 
+import re
 from util import *
 
 
@@ -14,15 +15,24 @@ def get_sum_data(dataset_name='xsum', split='validation'):
     return dataset
 
 
-def get_summ_prefix(tgt_token: str, raw_output_summary: str,start_matching_index:int) -> str:
+WORD = re.compile(r'\w+')
+
+
+def reg_tokenize(text):
+    words = WORD.findall(text)
+    return words
+
+
+def get_summ_prefix(tgt_token: str, raw_output_summary: str, start_matching_index: int) -> str:
     """
     Get the prefix summary given the query
     """
     lower_tgt_token = tgt_token.lower()
-    start_index = raw_output_summary.lower().find(lower_tgt_token,start_matching_index)
+    start_index = raw_output_summary.lower().find(
+        lower_tgt_token, start_matching_index)
     if start_index >= 0:
         summary_prefix = raw_output_summary[:start_index]
-        logger.info(f"Prefix: {summary_prefix}")
+        logger.debug(f"Prefix: {summary_prefix}")
     else:
         summary_prefix = ""
         logger.warn(
@@ -31,7 +41,7 @@ def get_summ_prefix(tgt_token: str, raw_output_summary: str,start_matching_index
 
 
 def init_vocab_distb_fix(tokenizer) -> torch.Tensor:
-    trans_mat = np.eye(tokenizer.vocab_size-1,dtype=np.float)
+    trans_mat = np.eye(tokenizer.vocab_size-1, dtype=np.float)
     cnt = 0
     for vocab_idx in range(tokenizer.vocab_size-1):
         tok = tokenizer.convert_ids_to_tokens(vocab_idx)

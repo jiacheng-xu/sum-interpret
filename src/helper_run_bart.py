@@ -1,9 +1,12 @@
 import os
 import string
 
-from transformers import BartForConditionalGeneration, BartTokenizer
 
 from util import *
+
+
+punctuation_token_ids = [
+    tokenizer.convert_tokens_to_ids(x) for x in string.punctuation]
 
 
 def init_bart_sum_model(mname='sshleifer/distilbart-cnn-6-6', device='cuda:0'):
@@ -60,7 +63,8 @@ def extract_tokens(original_str, nlp):
 def run_lm(model, tokenizer, device, sum_prefix="", topk=10):
     sum_prefix = sum_prefix.strip()
     # Mask filling only works for bart-large
-    TXT = f"{sum_prefix}<mask> "    # we basically remove all of the last step cases.
+    # we basically remove all of the last step cases.
+    TXT = f"{sum_prefix}<mask> "
     input_ids = tokenizer([TXT], return_tensors='pt')['input_ids'].to(device)
     logits = model(input_ids, return_dict=True)['logits']
     masked_index = (input_ids[0] == tokenizer.mask_token_id).nonzero().item()
@@ -72,32 +76,70 @@ def run_lm(model, tokenizer, device, sum_prefix="", topk=10):
 
 def run_implicit(model, tokenizer, device, sum_prefix=""):
     output, prob = run_full_model(
-        model, tokenizer, [" "], sum_prefix, device=device)
+        model, tokenizer, [" "], [sum_prefix], device=device)
     return output, prob
 
 
 def run_attn(model, tokenizer, input_text, sum_prefix="", device='cuda:0'):
     model.output_attentions = True
     output, prob = run_full_model(
-        model, tokenizer, input_text, sum_prefix, device=device, output_attentions=True)
+        model, tokenizer, [input_text], [sum_prefix], device=device, output_attentions=True)
     model.output_attentions = False  # reset
     return output, prob
 
 
-def run_full_model(model, tokenizer, input_text, sum_prefix, encoder_outputs=None, device='cuda:0', output_attentions=False, output_dec_hid=False):
+def get_cross_attention(cross_attn, input_ids, device, layer=-1):
+    # cross_attentions: nlayers, batch=1, head, dec len, enc len
+    attn = cross_attn[layer][:, :, -1, :]
+    # batch, nhead, enc_len
+    mean_attn = torch.mean(attn, dim=1)
+    assert len(mean_attn.size()) == 2
+    batch_size = mean_attn.shape[0]
+    topk = min(30, mean_attn.size()[1])
 
+    values, indices = torch.topk(mean_attn, k=topk, dim=-1)
+    values = values.detach().cpu().tolist()
+    indices = indices.detach().cpu().tolist()
+    outputs = []
+    for idx in range(batch_size):
+        input_ids_list = input_ids[idx].tolist()  # batch=1, enc len
+
+        p_list = [[0.0 for _ in range(tokenizer.vocab_size)]
+                  for jdx in range(batch_size)]
+        this_v, this_ind = values[idx], indices[idx]
+        for v, i in zip(this_v, this_ind):
+            this_token_id = input_ids_list[i]
+            if this_token_id not in punctuation_token_ids:
+                p_list[idx][input_ids_list[i]] += v
+        output = tokenizer.decode(int(input_ids_list[this_ind[0]]))
+        logging.info(f"{idx}: Most attention: {output}")
+        outputs.append(output)
+
+    p = torch.as_tensor(p_list, device=device)
+    p = p / torch.sum(p, dim=-1)
+
+    return outputs, p
+
+
+def run_full_model(model, tokenizer, input_text: List[str], sum_prefix: List[str], encoder_outputs=None, device='cuda:0', output_attentions=False, output_dec_hid=False):
+    # TODO make run_full_model batch compatible
     if not encoder_outputs:
         inputs = tokenizer(input_text, max_length=300,
                            return_tensors='pt', truncation=True, padding=True)
         encoder_outputs = model.model.encoder(
             inputs['input_ids'].to(device), return_dict=True)
 
-    sum_prefix = sum_prefix.strip()
+    sum_prefix = [_sum_prefix.strip() for _sum_prefix in sum_prefix]
     batch_size = len(input_text)
+    assert batch_size == len(sum_prefix)
+
+    if batch_size>1 and sum_prefix[0]!=sum_prefix[1]:
+        raise NotImplementedError('So far we assume the prefix are duplicates')
     decoder_input_ids = torch.LongTensor(tokenizer.encode(
-        sum_prefix, return_tensors='pt')).to(device)
-    decoder_input_ids = decoder_input_ids.expand(
-        (batch_size, decoder_input_ids.size()[-1]))
+        sum_prefix[0], return_tensors='pt') ).to(device)
+
+    decoder_input_ids = decoder_input_ids.expand((batch_size, decoder_input_ids.size()[-1]))
+
     # ATTN: remove the EOS token from the prefix!
     decoder_input_ids = decoder_input_ids[:, :-1]
 
@@ -114,33 +156,16 @@ def run_full_model(model, tokenizer, input_text, sum_prefix, encoder_outputs=Non
         # use cross attention as the distribution
         # last layer.   batch=1, head, dec len, enc len
         # by default we use the last layer of attention
-        cross_attns = outputs['cross_attentions'][-1]
-        attn = cross_attns[0, :, -1, :]    # head, enc len
-
-        mean_attn = torch.mean(attn, dim=0)
-        assert len(mean_attn.size()) == 1
-
-        topk = min(30, mean_attn.size()[0])
-
-        values, indices = torch.topk(mean_attn, k=topk)
-        values = values.detach().cpu().tolist()
-        indices = indices.detach().cpu().tolist()
-        input_ids_list = inputs['input_ids'][0].tolist()  # batch=1, enc len
-        output = tokenizer.decode(
-            int(input_ids_list[indices[0]]))
-        logging.info(f"Most attention: {output}")
-        p_list = [0.0 for _ in range(tokenizer.vocab_size)]
-        for v, i in zip(values, indices):
-            p_list[input_ids_list[i]] += v
-        p = torch.as_tensor(p_list, device=device)
-        p = p / p.sum()
+        output, p = get_cross_attention(
+            outputs['cross_attentions'], inputs['input_ids'], device=device)
         return output, p
     else:
+        # batch, dec seq, vocab size
         next_token_logits = outputs.logits[:, -1, :]
         prob = next_token_logits.softmax(dim=-1)
         next_token = torch.argmax(next_token_logits, dim=-1)
         # next_token = next_token.unsqueeze(-1)
-        next_token = next_token.tolist()
+        next_token = next_token.tolist()    # confrim nested list?
 
         output = [tokenizer.decode(tk) for tk in next_token]
         logging.info(f"Next token: {output}")

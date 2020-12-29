@@ -25,14 +25,22 @@ def init_ig():
     pass
 
 
-def _step_src_attr(interest: str, summary: str, document: str, model_pkg, device, start_matching_index=0):
+def _step_src_attr(interest: str, summary: str, document: str, document_sents: List[str], model_pkg, device, start_matching_index=0):
+    # print(f"start:{start_matching_index}\n{summary}")
     summary_prefix = get_summ_prefix(
-        tgt_token=interest, raw_output_summary=summary,start_matching_index=start_matching_index)
+        tgt_token=interest.strip(), raw_output_summary=summary, start_matching_index=start_matching_index)
+    new_start_match = len(summary_prefix) + len(interest)
+    # print(summary_prefix)
     if not summary_prefix:
         summary_prefix = model_pkg['tok'].bos_token
 
     sum_model_output, p_sum = run_full_model(
-        model_pkg['sum'], model_pkg['tok'], [document], device=device, sum_prefix=summary_prefix, output_dec_hid=True)
+        model_pkg['sum'], model_pkg['tok'], [document], device=device, sum_prefix=[summary_prefix], output_dec_hid=True)
+
+    # perturbation document_sents
+    num_perturb_sent = len(document_sents)
+    sum_model_output_pert, p_sum_pert = run_full_model(
+        model_pkg['sum'], model_pkg['tok'], document_sents, device=device, sum_prefix=[summary_prefix] * num_perturb_sent, output_dec_hid=False)
 
     lm_output_topk, p_lm = run_lm(
         model_pkg['lm'], model_pkg['tok'], device=device, sum_prefix=summary_prefix)
@@ -46,10 +54,10 @@ def _step_src_attr(interest: str, summary: str, document: str, model_pkg, device
         model_pkg['ood'], model_pkg['tok'], sum_prefix=summary_prefix, device=device)
 
     ood_model_output, p_ood = run_full_model(
-        model_pkg['ood'], model_pkg['tok'], [document], device=device, sum_prefix=summary_prefix, output_dec_hid=True)
+        model_pkg['ood'], model_pkg['tok'], [document], device=device, sum_prefix=[summary_prefix], output_dec_hid=True)
 
     most_attn, attn_distb = run_attn(
-        model_pkg['sum'], model_pkg['tok'], [document], sum_prefix=summary_prefix, device=device)
+        model_pkg['sum'], model_pkg['tok'], document, sum_prefix=summary_prefix, device=device)
 
     record = {}
     record['p_lm'] = p_lm.detach().cpu()
@@ -58,31 +66,37 @@ def _step_src_attr(interest: str, summary: str, document: str, model_pkg, device
     record['p_full'] = p_sum.detach().cpu()
     record['p_imp_ood'] = p_implicit_ood.detach().cpu()
     record['p_full_ood'] = p_ood.detach().cpu()
+    record['p_pert'] = p_sum_pert.detach().cpu()
+    record['pert_sents'] = document_sents
     # staple decoder hidden states
     dec_hid_states = [x[0, -1].detach().cpu()
                       for x in sum_model_output['decoder_hidden_states']]
     record['dec_hid'] = dec_hid_states
     record['prefix'] = summary_prefix
     record['interest'] = interest
-    return record, len(summary_prefix)+ len(interest)
+    return record, new_start_match
 
 
 @dec_print_wrap
-def src_attribute(document: str, summary: str, uid: str, model_pkg: dict, device):
+def src_attribute(document: str, summary: str, uid: str, model_pkg: dict, device, max_num_sent: int = 15):
+    """Source Attribution"""
     # doc_tok_ids, doc_str, doc_str_lower = tokenize_text(
     #     model_pkg['tok'], document)
     # logger.debug(f"Example: {doc_str[:600]} ...")
     pred_summary = gen_original_summary(
-        model_pkg['sum'], model_pkg['tok'], document, device)[0].strip()
+        model_pkg['sum'], model_pkg['tok'], document, device)[0].strip()    # best summary from the model with beam search
+    document_sents = document.split('\n')[:max_num_sent]
+
     logger.info(f"Model output summary: {pred_summary}")
     tokens, tags = extract_tokens(pred_summary, nlp=model_pkg['spacy'])
     outputs = []
     start_matching_index = 0
     for (tok, tag) in zip(tokens, tags):
         # one step
-        record,start_matching_index = _step_src_attr(tok, pred_summary, document, model_pkg, device, start_matching_index)
+        record, start_matching_index = _step_src_attr(
+            tok, pred_summary, document, document_sents, model_pkg, device, start_matching_index)
         record['token'] = tok
-        record['pos'] = tags
+        record['pos'] = tag
         # 'prefix': summary_prefix,
         # 'query': interest
         outputs.append(record)
@@ -101,15 +115,20 @@ def src_attribute(document: str, summary: str, uid: str, model_pkg: dict, device
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("-device", help="device to use", default='cuda:1')
+    parser.add_argument("-device", help="device to use", default='cuda:0')
     parser.add_argument("-data_name", default='xsum', help='name of dataset')
     parser.add_argument("-mname_lm", default='facebook/bart-large')
     parser.add_argument("-mname_sum", default='facebook/bart-large-xsum')
     parser.add_argument("-batch_size", default=40)
     parser.add_argument('-max_samples', default=1000)
+    parser.add_argument('-truncate_sent', default=15,
+                        help='the max sent used for perturbation')
     parser.add_argument('-dir_save', default="/mnt/data0/jcxu/interpret_output",
                         help="The location to save output data. ")
     args = parser.parse_args()
+    logger.info(args)
+    if not os.path.exists(args.dir_save):
+        os.makedirs(args.dir_save)
 
     # Run a PEGASUS/BART model to explain the local behavior
     # Sample one article from datasets
@@ -137,8 +156,9 @@ if __name__ == '__main__':
             document = data_point['document']
             summary = data_point['summary']
             uid = data_point['id']
+
             return_data = src_attribute(
-                document, summary, uid, model_pkg, device)
+                document, summary, uid, model_pkg, device, max_num_sent=args.truncate_sent)
             write_pkl_to_disk(args.dir_save, fname_prefix=uid +
                               "_p", data_obj=return_data)
     except KeyboardInterrupt:
