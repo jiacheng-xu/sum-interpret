@@ -122,7 +122,6 @@ def get_cross_attention(cross_attn, input_ids, device, layer=-1):
 
 
 def run_full_model(model, tokenizer, input_text: List[str], sum_prefix: List[str], encoder_outputs=None, device='cuda:0', output_attentions=False, output_dec_hid=False):
-    # TODO make run_full_model batch compatible
     if not encoder_outputs:
         inputs = tokenizer(input_text, max_length=300,
                            return_tensors='pt', truncation=True, padding=True)
@@ -133,12 +132,13 @@ def run_full_model(model, tokenizer, input_text: List[str], sum_prefix: List[str
     batch_size = len(input_text)
     assert batch_size == len(sum_prefix)
 
-    if batch_size>1 and sum_prefix[0]!=sum_prefix[1]:
+    if batch_size > 1 and sum_prefix[0] != sum_prefix[1]:
         raise NotImplementedError('So far we assume the prefix are duplicates')
     decoder_input_ids = torch.LongTensor(tokenizer.encode(
-        sum_prefix[0], return_tensors='pt') ).to(device)
+        sum_prefix[0], return_tensors='pt')).to(device)
 
-    decoder_input_ids = decoder_input_ids.expand((batch_size, decoder_input_ids.size()[-1]))
+    decoder_input_ids = decoder_input_ids.expand(
+        (batch_size, decoder_input_ids.size()[-1]))
 
     # ATTN: remove the EOS token from the prefix!
     decoder_input_ids = decoder_input_ids[:, :-1]

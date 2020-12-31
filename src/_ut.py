@@ -1,3 +1,7 @@
+from typing import Optional, List
+from argparse import Namespace
+from captum.attr import LayerIntegratedGradients, LayerGradientShap, LayerGradientXActivation, TokenReferenceBase
+from transformers import BatchEncoding, PreTrainedTokenizer
 import torch
 
 import logging
@@ -32,13 +36,6 @@ def get_sentiment_data():
     return dataset
 
 
-import torch
-
-from transformers import BatchEncoding, PreTrainedTokenizer
-from typing import Optional,List
-from captum.attr import LayerIntegratedGradients, LayerGradientShap, LayerGradientXActivation, TokenReferenceBase
-from argparse import Namespace
-
 """
 Setting: LayerIntegratedGradient over embedding. 
 No cache and batch size = 1 due to captum issues. 
@@ -46,6 +43,7 @@ No cache and batch size = 1 due to captum issues.
 
 # layer wise: inputs, baselines, target, additional_forward_args
 # for each summary, the model needs to encode the document again and again?
+
 
 class SummGenBase(torch.nn.Module):
     def __init__(self, model, tokenizer: PreTrainedTokenizer,  use_cache=False, max_len=50):
@@ -114,16 +112,17 @@ class SummGenBase(torch.nn.Module):
         print(input_doc.size())
         if attn_mask:
             print(attn_mask.size())
-        encoder_outputs = self.encoder(input_doc, attention_mask=attn_mask, return_dict=True)
+        encoder_outputs = self.encoder(
+            input_doc, attention_mask=attn_mask, return_dict=True)
         batch_size = input_doc.shape[0]
         device = input_doc.device
 
         expanded_batch_idxs = (
             torch.arange(batch_size)
-                .view(-1, 1)
-                .repeat(1, 1)
-                .view(-1)
-                .to(device)
+            .view(-1, 1)
+            .repeat(1, 1)
+            .view(-1)
+            .to(device)
         )
         encoder_outputs["last_hidden_state"] = encoder_outputs.last_hidden_state.index_select(
             0, expanded_batch_idxs
@@ -136,13 +135,14 @@ class SummGenBase(torch.nn.Module):
                         "decoder_input_ids": decoder_input_ids,
                         }
         print(model_inputs)
-        outputs = self.model(**model_inputs, use_cache=self.use_cache, return_dict=True)
+        outputs = self.model(
+            **model_inputs, use_cache=self.use_cache, return_dict=True)
         next_token_logits = outputs.logits[:, -1, :]
         next_token = torch.argmax(next_token_logits, dim=-1)
         if attr_mode:
             print(next_token_logits.shape)
             # vector_next_token_logits = next_token_logits.squeeze(0)
-            return next_token_logits[:,target]  # assume batch size = 1
+            return next_token_logits[:, target]  # assume batch size = 1
         next_token = next_token.unsqueeze(-1)
         cur_decoded = next_token.tolist()
         if "past_key_values" in outputs:

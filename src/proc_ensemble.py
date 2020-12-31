@@ -40,7 +40,8 @@ def show_top_k(prob, prefix, name, tokenizer, k=5):
 
 def fix_distribution(prob_distb, remapping_mat, truncate_vocab_size=50264, device='cuda:1', neu_samp=True):
     prob_distb = prob_distb.squeeze().to(device)
-    prob_distb = prob_distb[:truncate_vocab_size]
+
+    prob_distb = prob_distb[..., :truncate_vocab_size]
 
     mapped_prob = torch.matmul(prob_distb, remapping_mat)
     if neu_samp:
@@ -48,7 +49,7 @@ def fix_distribution(prob_distb, remapping_mat, truncate_vocab_size=50264, devic
         mapped_prob = torch.nn.functional.relu(mapped_prob)
     else:
         mapped_prob += + 1e-8
-    mapped_prob = mapped_prob/torch.sum(mapped_prob)
+    mapped_prob = mapped_prob/torch.sum(mapped_prob, dim=-1,keepdim=True)
     return mapped_prob
 
 
@@ -151,16 +152,25 @@ def feat_ngram_ref_domain(prefix: str, token: str, map_in_domain: Dict, map_ood:
 def feat_perturb(p_pert, p_full):
     # p_pert batch, vocab
     # p_full vocab
-    value, indices = torch.topk(p_full, k=1, dim=-1)
-    indi = indices.tolist()[0]
-    sel_values = p_pert[:, indi].tolist()
-    # print(sel_values)
-    assert len(sel_values) >= 1
-    top1 = max(sel_values)
     try:
-        var = statistics.variance(sel_values)
+        value, indices = torch.topk(p_full, k=1, dim=-1)
+
+        indi = indices.tolist()[0]
+
+        p_pert = fix_distribution(p_pert, distb_fix, device=device)
+        sel_values = p_pert[:, indi].tolist()
+        # print(sel_values)
+        assert len(sel_values) >= 1
+        top1 = max(sel_values)
+
+        max_value = max(sel_values)
+        
+        var = statistics.mean([abs(this_v - max_value) for this_v in sel_values])
+        # var = statistics.variance(sel_values)
     except:
         var = 0
+        top1 = 0,
+        sel_values = []
     return top1, var, sel_values
 
 
