@@ -25,13 +25,13 @@ now = datetime.now()
 logger = logging.getLogger('sum')
 logger.setLevel(logging.DEBUG)
 # create file handler which logs even debug messages
-fh = logging.FileHandler(f"{now.strftime('%m')}{now.strftime('%d')}.log")
+fh = logging.FileHandler(f"{now.strftime('%m')}{now.strftime('%d')}.html")
 fh.setLevel(logging.DEBUG)
 # create console handler with a higher log level
 ch = logging.StreamHandler()
 ch.setLevel(logging.INFO)
 # create formatter and add it to the handlers
-formatter = logging.Formatter('%(levelname)s - %(message)s')
+formatter = logging.Formatter('<br>%(levelname)s - %(message)s')
 ch.setFormatter(formatter)
 fh.setFormatter(formatter)
 # add the handlers to logger

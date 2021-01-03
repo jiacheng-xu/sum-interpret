@@ -1,5 +1,6 @@
 # Entrance for ensembling (src attribution) for distributions
 
+from new_ig import _step_ig
 from helper import get_summ_prefix
 from util import *
 
@@ -25,11 +26,11 @@ def init_ig():
     pass
 
 
-def _step_src_attr(interest: str, summary: str, document: str, document_sents: List[str], model_pkg, device, start_matching_index=0):
+def _step_src_attr(interest: str, summary_prefix: str,  document: str, document_sents: List[str], model_pkg, device):
     # print(f"start:{start_matching_index}\n{summary}")
-    summary_prefix = get_summ_prefix(
-        tgt_token=interest.strip(), raw_output_summary=summary, start_matching_index=start_matching_index)
-    new_start_match = len(summary_prefix) + len(interest)
+    # summary_prefix = get_summ_prefix(
+    #     tgt_token=interest.strip(), raw_output_summary=summary, start_matching_index=start_matching_index)
+    # new_start_match = len(summary_prefix) + len(interest)
     # print(summary_prefix)
     if not summary_prefix:
         summary_prefix = model_pkg['tok'].bos_token
@@ -74,7 +75,10 @@ def _step_src_attr(interest: str, summary: str, document: str, document_sents: L
     record['dec_hid'] = dec_hid_states
     record['prefix'] = summary_prefix
     record['interest'] = interest
-    return record, new_start_match
+    return record
+
+
+# The entrance for one document, more stuff to unpack
 
 
 @dec_print_wrap
@@ -93,13 +97,19 @@ def src_attribute(document: str, summary: str, uid: str, model_pkg: dict, device
     start_matching_index = 0
     for (tok, tag) in zip(tokens, tags):
         # one step
-        record, start_matching_index = _step_src_attr(
-            tok, pred_summary, document, document_sents, model_pkg, device, start_matching_index)
-        record['token'] = tok
-        record['pos'] = tag
-        # 'prefix': summary_prefix,
-        # 'query': interest
-        outputs.append(record)
+        summary_prefix = get_summ_prefix(
+            tgt_token=tok.strip(), raw_output_summary=pred_summary, start_matching_index=start_matching_index)
+        start_matching_index = len(summary_prefix) + len(tok.strip())
+        record = _step_src_attr(tok, summary_prefix, document,
+                                document_sents, model_pkg, device)
+        token_w_highest_prob = torch.argmax(record['p_full'])
+        output_ig = _step_ig(tok, summary_prefix, document,
+                             document_sents, model_pkg, device)
+    record['token'] = tok
+    record['pos'] = tag
+    # 'prefix': summary_prefix,
+    # 'query': interest
+    outputs.append(record)
 
     outputs.pop(-1)  # remove the EOS punct
     final = {

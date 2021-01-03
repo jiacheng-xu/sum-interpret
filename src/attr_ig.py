@@ -3,7 +3,7 @@ from torch import Tensor
 
 from torch.nn import CrossEntropyLoss
 
-from lib.model_wrap import WrapExplain
+# from lib.model_wrap import WrapExplain
 import logging
 
 from captum.attr._utils.visualization import format_word_importances

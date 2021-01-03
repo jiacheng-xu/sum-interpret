@@ -1,9 +1,12 @@
 # Running Integreated Gradient for an encoder-decoder model
 from util import *
 
+def run_model_core():
+    
+    pass
 
 def ig_full_model(model, tokenizer, input_text: List[str], sum_prefix: List[str], device='cuda:0', output_attentions=False, output_dec_hid=False):
-
+    
     inputs = tokenizer(input_text, max_length=300,
                        return_tensors='pt', truncation=True, padding=True)
     encoder_outputs = model.model.encoder(
