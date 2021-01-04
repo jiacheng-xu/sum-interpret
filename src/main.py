@@ -1,5 +1,7 @@
-# Entrance for ensembling (src attribution) for distributions
+# The main file. We are going to get source attribution and content attribution from this file.
+# After that, we can analyze the data and compile all the numbers
 
+import string
 from new_ig import _step_ig
 from helper import get_summ_prefix
 from util import *
@@ -66,8 +68,11 @@ def _step_src_attr(interest: str, summary_prefix: str,  document: str, document_
     record['p_attn'] = attn_distb.detach().cpu()
     record['p_full'] = p_sum.detach().cpu()
     record['p_imp_ood'] = p_implicit_ood.detach().cpu()
+
     record['p_full_ood'] = p_ood.detach().cpu()
+
     record['p_pert'] = p_sum_pert.detach().cpu()
+
     record['pert_sents'] = document_sents
     # staple decoder hidden states
     dec_hid_states = [x[0, -1].detach().cpu()
@@ -87,35 +92,59 @@ def src_attribute(document: str, summary: str, uid: str, model_pkg: dict, device
     # doc_tok_ids, doc_str, doc_str_lower = tokenize_text(
     #     model_pkg['tok'], document)
     # logger.debug(f"Example: {doc_str[:600]} ...")
+    summary = summary.strip()
+    document_sents = document.split('\n')[:max_num_sent]
+    document = "\n".join(document_sents)
+    input_doc = tokenizer([document], return_tensors='pt', max_length=300, truncation=True, padding=True)
+    """
     pred_summary = gen_original_summary(
         model_pkg['sum'], model_pkg['tok'], document, device)[0].strip()    # best summary from the model with beam search
-    document_sents = document.split('\n')[:max_num_sent]
-
+    
     logger.info(f"Model output summary: {pred_summary}")
-    tokens, tags = extract_tokens(pred_summary, nlp=model_pkg['spacy'])
+    """
+
+    # BUT we are going to use ref summary!!
+    tokens, tags = extract_tokens(summary, nlp=model_pkg['spacy'])
     outputs = []
     start_matching_index = 0
     for (tok, tag) in zip(tokens, tags):
         # one step
         summary_prefix = get_summ_prefix(
-            tgt_token=tok.strip(), raw_output_summary=pred_summary, start_matching_index=start_matching_index)
+            tgt_token=tok.strip(), raw_output_summary=summary, start_matching_index=start_matching_index)
         start_matching_index = len(summary_prefix) + len(tok.strip())
+        if tok.strip() in string.punctuation:
+            continue
         record = _step_src_attr(tok, summary_prefix, document,
                                 document_sents, model_pkg, device)
-        token_w_highest_prob = torch.argmax(record['p_full'])
-        output_ig = _step_ig(tok, summary_prefix, document,
-                             document_sents, model_pkg, device)
-    record['token'] = tok
-    record['pos'] = tag
-    # 'prefix': summary_prefix,
-    # 'query': interest
-    outputs.append(record)
+        # Integerated Gradient
+        if not summary_prefix.endswith(" "):
+            target_word_bpe = model_pkg['tok'].encode(" "+tok)[1]
+        else:
+            target_word_bpe = model_pkg['tok'].encode(tok)[1]
+        
+        (ig_enc_result, ig_dec_result, rt_dec_input_ids) = _step_ig(tok, actual_word_id=target_word_bpe, summary_prefix=[summary_prefix], input_doc=input_doc, num_run_cut=50,
+                                                  model_pkg=model_pkg,
+                                                  device=device)
+        record['tgt_bpe'] = target_word_bpe
+        record['tgt_bpe_tok'] = model_pkg['tok'].convert_ids_to_tokens(
+            target_word_bpe)
+        ig_enc_result= ig_enc_result.cpu().detach()
+        ig_dec_result =ig_dec_result.cpu().detach() 
+        record['prefix_token_ids'] = rt_dec_input_ids.cpu().detach()
+        record['ig_enc'] = ig_enc_result
+        record['ig_dec'] = ig_dec_result
+        record['token'] = tok
+        record['pos'] = tag
+        # 'prefix': summary_prefix,
+        # 'query': interest
+        outputs.append(record)
 
     outputs.pop(-1)  # remove the EOS punct
     final = {
         'data': outputs,
         'meta': {'document': document,
-                 'output': pred_summary,
+                'doc_token_ids':input_doc['input_ids'][0],
+                 #  'output': pred_summary,
                  'ref': summary,
                  'id': uid}
     }

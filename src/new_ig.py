@@ -3,6 +3,20 @@ from helper_run_bart import init_bart_sum_model
 from util import *
 from captum.attr import LayerIntegratedGradients, TokenReferenceBase
 import torch
+from captum.attr._utils.visualization import format_word_importances
+
+
+def simple_viz_attribution(tokenizer, input_ids, attribution_scores):
+    token_in_list = input_ids.tolist()
+    if isinstance(token_in_list[0], list):
+        token_in_list = token_in_list[0]
+    words = [tokenizer.decode(x) for x in token_in_list]
+    attribution_scores_list = attribution_scores.tolist()
+    # for w, ascore in zip(words, attribution_scores_list):
+    #     logging.info('{:10} {:02.2f}'.format(w, ascore))
+
+    output = format_word_importances(words, attribution_scores_list)
+    return output
 
 
 def interpolate_vectors(ref_vec, inp_vec, num_steps, device):
@@ -12,6 +26,12 @@ def interpolate_vectors(ref_vec, inp_vec, num_steps, device):
     rows = ranges * interp_step_vec
     interp_final = rows + ref_vec
     return interp_final
+
+
+def summarize_attributions(attributions):
+    attributions = attributions.sum(dim=-1)
+    attributions = attributions / torch.sum(attributions)
+    return attributions
 
 
 def forward_enc_dec_step(model, encoder_outputs, decoder_inputs_embeds):
@@ -35,8 +55,37 @@ def forward_enc_dec_step(model, encoder_outputs, decoder_inputs_embeds):
     return outputs
 
 
-def ig_dec():
-    pass
+def ig_dec(
+    bart_model, dec_inp_embedding, encoder_outputs,
+    dec_ref_embedding, tgt_class, device, num_steps=51
+):
+    interp_dec_embedding = interpolate_vectors(
+        dec_ref_embedding, dec_inp_embedding, num_steps, device)
+    encoder_outputs['last_hidden_state'] = encoder_outputs['last_hidden_state'].repeat(
+        (num_steps, 1, 1))
+    with torch.enable_grad():
+        interp_dec_embedding.retain_grad()
+        interp_out = forward_enc_dec_step(
+            bart_model, encoder_outputs=encoder_outputs, decoder_inputs_embeds=interp_dec_embedding)
+
+        logits = interp_out.logits[:, -1, :]
+        target = torch.ones(num_steps, dtype=torch.long,device=device) * tgt_class
+
+        loss = torch.nn.functional.cross_entropy(logits, target)
+        # loss.backward(retain_graph=True)
+        loss.backward()
+        logger.info(f"Loss: {loss.tolist()}")
+        raw_grad = interp_dec_embedding.grad
+
+        # Approximate the integral using the trapezodal rule
+        approx_grad = (raw_grad[:-1] + raw_grad[1:]) / 2
+        # print(approx_grad.size())
+        avg_grad = torch.mean(approx_grad, dim=0)  # input len, hdim
+        # print(encoder_outputs.last_hidden_state.size())
+        # print(ref_encoder_outputs.last_hidden_state.size())
+        integrated_gradient = (
+            dec_inp_embedding[0] - dec_ref_embedding[0]) * avg_grad  # seq_len, hdim
+    return integrated_gradient
 
 
 def bart_decoder_forward_embed(input_ids, embed_tokens, embed_scale):
@@ -65,10 +114,11 @@ def ig_enc(bart_model, dec_inp_embedding, tgt_class: int, encoder_outputs, ref_e
             bart_model, encoder_outputs=interp_encoder_outputs, decoder_inputs_embeds=dec_inp_embedding)
 
         logits = interp_out.logits[:, -1, :]
-        target = torch.ones(num_steps, dtype=torch.long) * tgt_class
+        target = torch.ones(num_steps, dtype=torch.long,device=device) * tgt_class
 
         loss = torch.nn.functional.cross_entropy(logits, target)
-        loss.backward(retain_graph=True)
+        # loss.backward(retain_graph=True)
+        loss.backward()
         logger.info(f"Loss: {loss.tolist()}")
         raw_grad = interp_encoder_outputs.last_hidden_state.grad
 
@@ -95,10 +145,12 @@ def gen_ref_input(batch_size, seq_len, bos_token_id, pad_token_id, eos_token_id,
     return expanded_input
 
 
-def _step_ig(interest: str, actual_word_id: int, summary_prefix: List[str], document: List[str], document_sents: List[str], num_run_cut: int, model_pkg, device):
+def _step_ig(interest: str, actual_word_id: int, summary_prefix: List[str], input_doc,
+             # document: List[str],
+             # document_sents: List[str],
+             num_run_cut: int, model_pkg, device):
     # assume the batch size is one because we are going to use batch_size as the num trials for ig
-    input_doc = tokenizer(document, max_length=300,
-                          return_tensors='pt', truncation=True, padding=True)
+    # input_doc = tokenizer(document, return_tensors='pt', truncation=True, padding=True)
     # input_doc = input_doc.to(device)
 
     batch_size, seq_len = input_doc['input_ids'].size()
@@ -119,12 +171,13 @@ def _step_ig(interest: str, actual_word_id: int, summary_prefix: List[str], docu
     # encode dec input
     decoder_input_ids = torch.LongTensor(tokenizer.encode(
         summary_prefix[0], return_tensors='pt')).to(device)
-
+    rt_dec_input_ids = decoder_input_ids.clone().to('cpu')
     decoder_input_ids = decoder_input_ids.expand(
         (num_run_cut, decoder_input_ids.size()[-1]))
     # ATTN: remove the EOS token from the prefix!
-    dec_seq_len = decoder_input_ids.size()[-1]
+
     decoder_input_ids = decoder_input_ids[:, :-1]
+    dec_seq_len = decoder_input_ids.size()[-1]
     model_decoder = model_pkg['sum'].model.decoder
     dec_reference = gen_ref_input(num_run_cut, dec_seq_len, tokenizer.bos_token_id,
                                   tokenizer.pad_token_id, tokenizer.eos_token_id, device)
@@ -138,15 +191,27 @@ def _step_ig(interest: str, actual_word_id: int, summary_prefix: List[str], docu
     dec_ref_embedding = bart_decoder_forward_embed(
         dec_reference, embed_tokens, embed_scale)
 
-    ig_enc(model_pkg['sum'],
-           dec_inp_embedding=dec_inp_embedding, encoder_outputs=encoder_outputs,
-           ref_encoder_outputs=ref_encoder_outputs, tgt_class=actual_word_id, device=device)
-    ig_dec(
+    ig_enc_result = ig_enc(model_pkg['sum'],
+                           dec_inp_embedding=dec_inp_embedding, encoder_outputs=encoder_outputs,
+                           ref_encoder_outputs=ref_encoder_outputs, tgt_class=actual_word_id, device=device,num_steps=num_run_cut)
+    ig_dec_result = ig_dec(
         model_pkg['sum'],
-           dec_inp_embedding=dec_inp_embedding, encoder_outputs=encoder_outputs,
-           dec_ref_embedding=dec_ref, tgt_class=actual_word_id, device=device
-    )
-    exit()
+        dec_inp_embedding=dec_inp_embedding, encoder_outputs=encoder_outputs,
+        dec_ref_embedding=dec_ref_embedding, tgt_class=actual_word_id, device=device,num_steps=num_run_cut)
+    ig_enc_result = summarize_attributions(ig_enc_result)
+    ig_dec_result = summarize_attributions(ig_dec_result)
+    if random.random()<0.01:
+        extracted_attribution = ig_enc_result.squeeze(0)
+        input_doc = input_doc['input_ids'].squeeze(0)
+        viz = simple_viz_attribution(
+            tokenizer, input_doc, extracted_attribution)
+        logger.info(viz)
+
+        extracted_attribution = ig_dec_result
+        viz = simple_viz_attribution(
+            tokenizer, decoder_input_ids[0], extracted_attribution)
+        logger.info(viz)
+    return ig_enc_result, ig_dec_result,rt_dec_input_ids
 
 
 if __name__ == "__main__":
