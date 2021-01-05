@@ -29,8 +29,9 @@ def interpolate_vectors(ref_vec, inp_vec, num_steps, device):
 
 
 def summarize_attributions(attributions):
+    # attributions = torch.abs(attributions)
     attributions = attributions.sum(dim=-1)
-    attributions = attributions / torch.sum(attributions)
+    attributions = attributions / torch.norm(attributions)
     return attributions
 
 
@@ -69,7 +70,8 @@ def ig_dec(
             bart_model, encoder_outputs=encoder_outputs, decoder_inputs_embeds=interp_dec_embedding)
 
         logits = interp_out.logits[:, -1, :]
-        target = torch.ones(num_steps, dtype=torch.long,device=device) * tgt_class
+        target = torch.ones(num_steps, dtype=torch.long,
+                            device=device) * tgt_class
 
         loss = torch.nn.functional.cross_entropy(logits, target)
         # loss.backward(retain_graph=True)
@@ -114,11 +116,12 @@ def ig_enc(bart_model, dec_inp_embedding, tgt_class: int, encoder_outputs, ref_e
             bart_model, encoder_outputs=interp_encoder_outputs, decoder_inputs_embeds=dec_inp_embedding)
 
         logits = interp_out.logits[:, -1, :]
-        target = torch.ones(num_steps, dtype=torch.long,device=device) * tgt_class
+        target = torch.ones(num_steps, dtype=torch.long,
+                            device=device) * tgt_class
 
         loss = torch.nn.functional.cross_entropy(logits, target)
-        # loss.backward(retain_graph=True)
-        loss.backward()
+        loss.backward(retain_graph=True)
+        # loss.backward()
         logger.info(f"Loss: {loss.tolist()}")
         raw_grad = interp_encoder_outputs.last_hidden_state.grad
 
@@ -193,14 +196,14 @@ def _step_ig(interest: str, actual_word_id: int, summary_prefix: List[str], inpu
 
     ig_enc_result = ig_enc(model_pkg['sum'],
                            dec_inp_embedding=dec_inp_embedding, encoder_outputs=encoder_outputs,
-                           ref_encoder_outputs=ref_encoder_outputs, tgt_class=actual_word_id, device=device,num_steps=num_run_cut)
+                           ref_encoder_outputs=ref_encoder_outputs, tgt_class=actual_word_id, device=device, num_steps=num_run_cut)
     ig_dec_result = ig_dec(
         model_pkg['sum'],
         dec_inp_embedding=dec_inp_embedding, encoder_outputs=encoder_outputs,
-        dec_ref_embedding=dec_ref_embedding, tgt_class=actual_word_id, device=device,num_steps=num_run_cut)
+        dec_ref_embedding=dec_ref_embedding, tgt_class=actual_word_id, device=device, num_steps=num_run_cut)
     ig_enc_result = summarize_attributions(ig_enc_result)
     ig_dec_result = summarize_attributions(ig_dec_result)
-    if random.random()<0.01:
+    if random.random() < 1:
         extracted_attribution = ig_enc_result.squeeze(0)
         input_doc = input_doc['input_ids'].squeeze(0)
         viz = simple_viz_attribution(
@@ -211,7 +214,7 @@ def _step_ig(interest: str, actual_word_id: int, summary_prefix: List[str], inpu
         viz = simple_viz_attribution(
             tokenizer, decoder_input_ids[0], extracted_attribution)
         logger.info(viz)
-    return ig_enc_result, ig_dec_result,rt_dec_input_ids
+    return ig_enc_result, ig_dec_result, rt_dec_input_ids
 
 
 if __name__ == "__main__":
