@@ -18,7 +18,7 @@ import pandas as pd
 
 tokenizer = BartTokenizer.from_pretrained('facebook/bart-large')
 
-kld = torch.nn.KLDivLoss(log_target=True,reduction='none')
+kld = torch.nn.KLDivLoss(log_target=True, reduction='none')
 
 now = datetime.now()
 
@@ -39,15 +39,29 @@ logger.addHandler(ch)
 logger.addHandler(fh)
 
 
+def load_pickle(dir, fname) -> Dict:
+    with open(os.path.join(dir, fname), 'rb') as rfd:
+        data = pickle.load(rfd)
+    return data
+
+
+def pnum(num):
+    return "{:.2f}".format(num)
+
+
 def dec_print_wrap(func):
-    def wrapper(*args,**kwargs):
+    def wrapper(*args, **kwargs):
         logging.info("=" * 20)
-        out = func(*args,**kwargs)
+        out = func(*args, **kwargs)
         logging.info("-" * 20)
         return out
     return wrapper
 
 
-# Transformers
+def read_meta_data(dir, fname):
+    file_package = load_pickle(dir, fname)
+    data: List = file_package['data']
+    meta = file_package['meta']
+    return data, meta
 
 random.seed(2021)

@@ -7,7 +7,7 @@ from helper import get_summ_prefix
 from util import *
 
 from helper import get_sum_data
-from helper_run_bart import (write_pkl_to_disk,init_spacy,extract_tokens)
+from helper_run_bart import (write_pkl_to_disk, init_spacy, extract_tokens)
 
 
 if __name__ == '__main__':
@@ -17,7 +17,7 @@ if __name__ == '__main__':
     parser.add_argument("-data_name", default='xsum', help='name of dataset')
     parser.add_argument('-truncate_sent', default=20,
                         help='the max sent used for perturbation')
-    parser.add_argument('-dir_save', default="/mnt/data0/jcxu/meta_data",
+    parser.add_argument('-dir_save', default="/mnt/data0/jcxu/meta_data_ref",
                         help="The location to save output data. ")
     args = parser.parse_args()
     logger.info(args)
@@ -67,10 +67,16 @@ if __name__ == '__main__':
             record = {}
             if not summary_prefix.endswith(" "):
                 target_word_bpe = model_pkg['tok'].encode(" "+tok)[1]
+                target_word_bpe_backup = model_pkg['tok'].encode(tok)[1]
             else:
+                target_word_bpe_backup = model_pkg['tok'].encode(" "+tok)[1]
                 target_word_bpe = model_pkg['tok'].encode(tok)[1]
+
             prefix_token_ids = tokenizer(summary_prefix, return_tensors='pt',)
+
+            prefix_token_ids = prefix_token_ids['input_ids'][:,:-1]
             record['tgt_token_id'] = target_word_bpe
+            record['tgt_token_id_backup'] = target_word_bpe_backup
             record['tgt_token'] = model_pkg['tok'].convert_ids_to_tokens(
                 target_word_bpe)
             record['prefix'] = summary_prefix
@@ -83,7 +89,7 @@ if __name__ == '__main__':
         final = {
             'data': outputs,
             'meta': {'document': document,
-                     'doc_token_ids': input_doc['input_ids'].squeeze(),
+                     'doc_token_ids': input_doc['input_ids'],
                      'ref': summary,
                      'id': uid}}
 

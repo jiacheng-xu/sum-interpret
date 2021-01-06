@@ -1,3 +1,5 @@
+from helper_run_bart import write_pkl_to_disk
+from main import init_bart_family
 from transformers.modeling_outputs import BaseModelOutput
 from helper_run_bart import init_bart_sum_model
 from util import *
@@ -29,7 +31,6 @@ def interpolate_vectors(ref_vec, inp_vec, num_steps, device):
 
 
 def summarize_attributions(attributions):
-    # attributions = torch.abs(attributions)
     attributions = attributions.sum(dim=-1)
     attributions = attributions / torch.norm(attributions)
     return attributions
@@ -120,8 +121,8 @@ def ig_enc(bart_model, dec_inp_embedding, tgt_class: int, encoder_outputs, ref_e
                             device=device) * tgt_class
 
         loss = torch.nn.functional.cross_entropy(logits, target)
-        loss.backward(retain_graph=True)
-        # loss.backward()
+        # loss.backward(retain_graph=True)
+        loss.backward()
         logger.info(f"Loss: {loss.tolist()}")
         raw_grad = interp_encoder_outputs.last_hidden_state.grad
 
@@ -148,10 +149,59 @@ def gen_ref_input(batch_size, seq_len, bos_token_id, pad_token_id, eos_token_id,
     return expanded_input
 
 
-def _step_ig(interest: str, actual_word_id: int, summary_prefix: List[str], input_doc,
-             # document: List[str],
-             # document_sents: List[str],
-             num_run_cut: int, model_pkg, device):
+def new_step_int_grad(input_ids, actual_word_id, prefix_token_ids, num_run_cut, model_pkg, device):
+
+    batch_size, seq_len = input_ids.size()
+    assert batch_size == 1
+    # encode enc input
+    enc_reference = gen_ref_input(num_run_cut, seq_len, tokenizer.bos_token_id,
+                                  tokenizer.pad_token_id, tokenizer.eos_token_id, device)
+    model_encoder = model_pkg['sum'].model.encoder
+    encoder_outputs = model_encoder(
+        input_ids.to(device), return_dict=True)
+
+    ref_encoder_outputs = model_encoder(
+        enc_reference, return_dict=True)
+    assert isinstance(ref_encoder_outputs, BaseModelOutput)
+
+    # encode dec input
+    prefix_token_ids = prefix_token_ids.to(device)
+    decoder_input_ids = prefix_token_ids.repeat((num_run_cut, 1))
+
+    dec_seq_len = decoder_input_ids.size()[-1]
+    model_decoder = model_pkg['sum'].model.decoder
+    embed_scale = model_decoder.embed_scale
+    embed_tokens = model_decoder.embed_tokens
+    # dec input embedding
+    dec_inp_embedding = bart_decoder_forward_embed(
+        decoder_input_ids, embed_tokens, embed_scale)
+    # # dec ref embedding
+    # dec_ref_embedding = bart_decoder_forward_embed(
+    #     dec_reference, embed_tokens, embed_scale)
+
+    ig_enc_result = ig_enc(model_pkg['sum'],
+                           dec_inp_embedding=dec_inp_embedding, encoder_outputs=encoder_outputs,
+                           ref_encoder_outputs=ref_encoder_outputs, tgt_class=actual_word_id, device=device, num_steps=num_run_cut)
+    # ig_dec_result = ig_dec(
+    #     model_pkg['sum'],
+    #     dec_inp_embedding=dec_inp_embedding, encoder_outputs=encoder_outputs,
+    #     dec_ref_embedding=dec_ref_embedding, tgt_class=actual_word_id, device=device, num_steps=num_run_cut)
+    ig_enc_result = summarize_attributions(ig_enc_result)
+    # ig_dec_result = summarize_attributions(ig_dec_result)
+    if random.random() < 0.1:
+        extracted_attribution = ig_enc_result.squeeze(0)
+        input_doc = input_ids.squeeze(0)
+        viz = simple_viz_attribution(
+            tokenizer, input_doc, extracted_attribution)
+        logger.info(viz)
+        # extracted_attribution = ig_dec_result
+        # viz = simple_viz_attribution(
+        #     tokenizer, decoder_input_ids[0], extracted_attribution)
+        # logger.info(viz)
+    return ig_enc_result
+
+
+def step_int_grad(interest: str, actual_word_id: int, summary_prefix: List[str], input_doc, num_run_cut: int, model_pkg, device):
     # assume the batch size is one because we are going to use batch_size as the num trials for ig
     # input_doc = tokenizer(document, return_tensors='pt', truncation=True, padding=True)
     # input_doc = input_doc.to(device)
@@ -205,7 +255,7 @@ def _step_ig(interest: str, actual_word_id: int, summary_prefix: List[str], inpu
     ig_dec_result = summarize_attributions(ig_dec_result)
     if random.random() < 1:
         extracted_attribution = ig_enc_result.squeeze(0)
-        input_doc = input_doc['input_ids'].squeeze(0)
+        input_doc = input_ids.squeeze(0)
         viz = simple_viz_attribution(
             tokenizer, input_doc, extracted_attribution)
         logger.info(viz)
@@ -218,6 +268,49 @@ def _step_ig(interest: str, actual_word_id: int, summary_prefix: List[str], inpu
 
 
 if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-device", help="device to use", default='cuda:0')
+    parser.add_argument("-data_name", default='xsum', help='name of dataset')
+    parser.add_argument("-mname_lm", default='facebook/bart-large')
+    parser.add_argument("-mname_sum", default='facebook/bart-large-xsum')
+    parser.add_argument("-batch_size", default=40)
+    parser.add_argument('-max_samples', default=1000)
+    parser.add_argument('-num_run_cut', default=50)
+    parser.add_argument('-truncate_sent', default=15,
+                        help='the max sent used for perturbation')
+    parser.add_argument('-dir_read', default='/mnt/data0/jcxu/meta_data_ref',
+                        help="Path of the meta data to read.")
+    parser.add_argument('-dir_save', default="/mnt/data0/jcxu/output_ig",
+                        help="The location to save output data. ")
+    args = parser.parse_args()
+    logger.info(args)
+    if not os.path.exists(args.dir_save):
+        os.makedirs(args.dir_save)
+    device = args.device
+
+    model_lm, model_sum, model_sum_ood, tokenizer = init_bart_family(
+        args.mname_lm, args.mname_sum, device, no_lm=True, no_ood=True)
+    logger.info("Done loading BARTs.")
+    model_pkg = {'sum': model_sum, 'tok': tokenizer}
+    all_files = os.listdir(args.dir_read)
+    for f in all_files:
+        outputs = []
+        step_data, meta_data = read_meta_data(args.dir_read, f)
+        uid = meta_data['id']
+        for step in step_data:
+            ig_enc_result = new_step_int_grad(meta_data['doc_token_ids'], actual_word_id=step['tgt_token_id'], prefix_token_ids=step['prefix_token_ids'],
+                                              num_run_cut=args.num_run_cut, model_pkg=model_pkg, device=device)
+            ig_enc_result = ig_enc_result.squeeze(0).cpu().detach()
+            outputs.append(ig_enc_result)
+        skinny_meta = {
+            'doc_token_ids': meta_data['doc_token_ids'].squeeze(),
+            'output': outputs
+        }
+        write_pkl_to_disk(args.dir_save, uid, skinny_meta)
+        print(f"Done {uid}.pkl")
+
+    """
     interest = "Google"
     summary_prefix = "She didn't know her kidnapper but he was using"
     document = 'Google Maps is a web mapping service developed by Google. It offers satellite imagery, aerial photography, street maps, 360 interactive panoramic views of streets, real-time traffic conditions, and route planning for traveling by foot, car, bicycle, air and public transportation.'
@@ -229,5 +322,6 @@ if __name__ == "__main__":
     model_pkg = {'lm': None, 'sum': model_sum, 'ood': None, 'tok': bart_tokenizer,
                  'spacy': None}
     actual_word_id = tokenizer.encode(" "+interest)[1]
-    _step_ig(interest, actual_word_id, summary_prefix=[summary_prefix], document=[
-             document], document_sents=document_sents, num_run_cut=51, model_pkg=model_pkg, device=device)
+    step_int_grad(interest, actual_word_id, summary_prefix=[summary_prefix], document=[
+        document], document_sents=document_sents, num_run_cut=51, model_pkg=model_pkg, device=device)
+    """

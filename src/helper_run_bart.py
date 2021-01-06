@@ -121,6 +121,39 @@ def get_cross_attention(cross_attn, input_ids, device, layer=-1):
     return outputs, p
 
 
+@torch.no_grad()
+def run_full_model_slim(model, input_ids, attention_mask, decoder_input_ids, targets=None, device='cuda:0', output_dec_hid=False):
+    decoder_input_ids = decoder_input_ids.to(device)
+    input_ids = input_ids.to(device)
+    attention_mask = attention_mask.to(device)
+    assert decoder_input_ids.size()[0] == input_ids.size()[0]
+    model_inputs = {"input_ids": input_ids,
+                    "attention_mask": attention_mask,
+                    "decoder_input_ids": decoder_input_ids,
+                    }
+    outputs = model(**model_inputs,
+                    output_hidden_states=output_dec_hid,
+                    use_cache=False, return_dict=True)
+
+    # batch, dec seq, vocab size
+    next_token_logits = outputs.logits[:, -1, :]
+    if targets is not None:
+        targets = targets.to(device)
+        loss = torch.nn.functional.cross_entropy(
+            input=next_token_logits, target=targets, reduction='none')
+    else:
+        loss = 0
+    prob = next_token_logits.softmax(dim=-1)
+    next_token = torch.argmax(next_token_logits, dim=-1)
+    # next_token = next_token.unsqueeze(-1)
+    next_token = next_token.tolist()    # confrim nested list?
+    print(f"Gold: {tokenizer.decode(targets[0].item())}")
+    output = [tokenizer.decode(tk) for tk in next_token]
+    logging.info(f"Next token: {output}")
+    outputs['output'] = output
+    return output, prob, loss
+
+
 def run_full_model(model, tokenizer, input_text: List[str], sum_prefix: List[str], encoder_outputs=None, device='cuda:0', output_attentions=False, output_dec_hid=False):
     if not encoder_outputs:
         inputs = tokenizer(input_text, max_length=300,

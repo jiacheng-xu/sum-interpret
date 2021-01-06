@@ -12,15 +12,7 @@ distb_fix = distb_fix.to(device)
 
 # bigram match in train doc and test doc
 
-
-def load_pickle(dir, fname) -> Dict:
-    with open(os.path.join(dir, fname), 'rb') as rfd:
-        data = pickle.load(rfd)
-    return data
-
-
-def pnum(num):
-    return "{:.2f}".format(num)
+from util import load_pickle,pnum
 
 
 @dec_print_wrap
