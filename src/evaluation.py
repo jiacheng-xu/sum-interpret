@@ -2,6 +2,7 @@
 from util import *
 from main import init_bart_family
 from helper_run_bart import run_full_model_slim
+
 budget_ig = [0, 1, 2, 4]
 
 
@@ -115,7 +116,6 @@ if __name__ == "__main__":
     if args.task == 'ig':
         dir_read = args.dir_ig
     else:
-
         raise NotImplementedError
     # tokenizer = BartTokenizer.from_pretrained('facebook/bart-large')
     all_files = os.listdir(dir_read)

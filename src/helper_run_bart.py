@@ -74,16 +74,16 @@ def run_lm(model, tokenizer, device, sum_prefix="", topk=10):
     return top_output[0], probs
 
 
-def run_implicit(model, tokenizer, device, sum_prefix=""):
-    output, prob = run_full_model(
-        model, tokenizer, [" "], [sum_prefix], device=device)
-    return output, prob
+# def run_implicit(model, device, sum_prefix=""):
+#     run_full_model_slim(model,)
+#     output, prob = run_full_model(
+#         model, tokenizer, [" "], [sum_prefix], device=device)
+#     return output, prob
 
 
-def run_attn(model, tokenizer, input_text, sum_prefix="", device='cuda:0'):
+def run_attn(model,input_ids , prefix_ids, device='cuda:0'):
     model.output_attentions = True
-    output, prob = run_full_model(
-        model, tokenizer, [input_text], [sum_prefix], device=device, output_attentions=True)
+    output, prob= run_full_model_slim(model,input_ids,None,decoder_input_ids=prefix_ids,output_attentions=True)
     model.output_attentions = False  # reset
     return output, prob
 
@@ -122,17 +122,18 @@ def get_cross_attention(cross_attn, input_ids, device, layer=-1):
 
 
 @torch.no_grad()
-def run_full_model_slim(model, input_ids, attention_mask, decoder_input_ids, targets=None, device='cuda:0', output_dec_hid=False):
+def run_full_model_slim(model, input_ids, attention_mask=None, decoder_input_ids=None, targets=None, device='cuda:0', output_dec_hid=False, output_attentions=False):
     decoder_input_ids = decoder_input_ids.to(device)
     input_ids = input_ids.to(device)
-    attention_mask = attention_mask.to(device)
+    if attention_mask:
+        attention_mask = attention_mask.to(device)
     assert decoder_input_ids.size()[0] == input_ids.size()[0]
     model_inputs = {"input_ids": input_ids,
                     "attention_mask": attention_mask,
                     "decoder_input_ids": decoder_input_ids,
                     }
     outputs = model(**model_inputs,
-                    output_hidden_states=output_dec_hid,
+                    output_hidden_states=output_dec_hid,output_attentions=output_attentions,
                     use_cache=False, return_dict=True)
 
     # batch, dec seq, vocab size
@@ -143,11 +144,18 @@ def run_full_model_slim(model, input_ids, attention_mask, decoder_input_ids, tar
             input=next_token_logits, target=targets, reduction='none')
     else:
         loss = 0
+    if output_attentions:
+        # use cross attention as the distribution
+        # last layer.   batch=1, head, dec len, enc len
+        # by default we use the last layer of attention
+        output, p = get_cross_attention(
+            outputs['cross_attentions'], input_ids, device=device)
+        return output, p
     prob = next_token_logits.softmax(dim=-1)
     next_token = torch.argmax(next_token_logits, dim=-1)
     # next_token = next_token.unsqueeze(-1)
     next_token = next_token.tolist()    # confrim nested list?
-    print(f"Gold: {tokenizer.decode(targets[0].item())}")
+    # print(f"Gold: {tokenizer.decode(targets[0].item())}")
     output = [tokenizer.decode(tk) for tk in next_token]
     logging.info(f"Next token: {output}")
     outputs['output'] = output
@@ -204,6 +212,22 @@ def run_full_model(model, tokenizer, input_text: List[str], sum_prefix: List[str
         logging.info(f"Next token: {output}")
         outputs['output'] = output
         return outputs, prob
+
+
+
+def init_bart_family(name_lm, name_sum, device, no_lm=False, no_ood=False):
+    if not no_lm:
+        lm_model, tok = init_bart_lm_model(name_lm, device)
+    else:
+        lm_model = None
+    sum_model, tok = init_bart_sum_model(name_sum, device)
+    if not no_ood:
+        sum_out_of_domain, _ = init_bart_sum_model(
+            "facebook/bart-large-cnn", device)
+    else:
+        sum_out_of_domain = None
+    return lm_model, sum_model, sum_out_of_domain, tok
+
 
 
 def write_pkl_to_disk(path: str, fname_prefix: str, data_obj):
