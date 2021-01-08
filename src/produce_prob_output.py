@@ -1,23 +1,12 @@
 # The main file. We are going to get source attribution and content attribution from this file.
 # After that, we can analyze the data and compile all the numbers
 
-import string
-
-
-from helper import get_summ_prefix
-from util import *
-
-from helper import get_sum_data
 from helper_run_bart import (gen_original_summary, init_bart_lm_model,
-                             init_bart_sum_model, tokenize_text, extract_tokens, run_full_model, run_lm, init_spacy, run_attn, write_pkl_to_disk, run_full_model_slim)
-
-
-def init_lime():
-    pass
-
-
-def init_ig():
-    pass
+                             init_bart_sum_model, tokenize_text, extract_tokens, run_full_model, run_lm, init_spacy, run_attn, write_pkl_to_disk, run_full_model_slim, init_bart_family)
+from helper import get_sum_data
+from util import *
+from helper import *
+import string
 
 
 def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, document_sents: List[str], model_pkg, device):
@@ -28,12 +17,12 @@ def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, document_sents: L
     # print(summary_prefix)
     if not summary_prefix:
         summary_prefix = model_pkg['tok'].bos_token
-
+    input_ids = input_ids[:,:500]
     batch_size = input_ids.size()[0]
     implicit_input = torch.LongTensor(
         [[0, 2] for _ in range(batch_size)]).to(device)
     # sum_model_output, p_sum = run_full_model(model_pkg['sum'], model_pkg['tok'], [document], device=device, sum_prefix=[summary_prefix], output_dec_hid=True)
-    _, p_sum, _ = run_full_model_slim(
+    _, p_full, _ = run_full_model_slim(
         model=model_pkg['sum'], input_ids=input_ids, attention_mask=None, decoder_input_ids=prefix_ids, targets=None
     )
     # perturbation document_sents
@@ -46,38 +35,55 @@ def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, document_sents: L
     # lm_output_topk is a list of tokens
 
     # implicit_output, p_implicit = run_implicit(model_pkg['sum'], model_pkg['tok'], sum_prefix=summary_prefix, device=device)
-    _, p_implicit, _ = run_full_model_slim(
+    _, p_imp, _ = run_full_model_slim(
         model_pkg['sum'], implicit_input, None, prefix_ids, None, device=device)
 
     # Out of domain model
     # implicit_ood_output, p_implicit_ood = run_implicit(model_pkg['ood'], model_pkg['tok'], sum_prefix=summary_prefix, device=device)
-    _, p_implicit_ood, _ = run_full_model_slim(
+    _, p_imp_ood, _ = run_full_model_slim(
         model_pkg['ood'], implicit_input, None, prefix_ids, None, device)
 
     _, p_ood, _ = run_full_model_slim(
-        model_pkg['ood'],input_ids=input_ids, attention_mask=None, decoder_input_ids=prefix_ids, targets=None)
+        model_pkg['ood'], input_ids=input_ids, attention_mask=None, decoder_input_ids=prefix_ids, targets=None)
 
-    most_attn, attn_distb = run_attn(
+    most_attn, p_attn = run_attn(
         model_pkg['sum'], input_ids=input_ids, prefix_ids=prefix_ids, device=device)
 
-    record = {}
+    p_lm = fix_distribution(p_lm, distb_fix, device=device)
+    p_imp = fix_distribution(p_imp, distb_fix, device=device)
+    p_full = fix_distribution(p_full, distb_fix, device=device)
+    p_imp_ood = fix_distribution(p_imp_ood, distb_fix, device=device)
+    # p_full_ood = fix_distribution(p_full_ood, distb_fix, device=device)
+    p_attn = fix_distribution(p_attn, distb_fix, device=device)
+    signature = ['lm', 'imp', 'full', 'imp_cnn',  'attn']
+    distributions = [p_lm, p_imp, p_full, p_imp_ood,  p_attn]
+    # result = compute_group_kl(distributions, signature)
+    record = compute_group_deduct(distributions, signature)
     record['p_lm'] = p_lm.detach().cpu()
-    record['p_imp'] = p_implicit.detach().cpu()
-    record['p_attn'] = attn_distb.detach().cpu()
-    record['p_full'] = p_sum.detach().cpu()
-    record['p_imp_ood'] = p_implicit_ood.detach().cpu()
-
-    record['p_full_ood'] = p_ood.detach().cpu()
-
+    record['p_imp'] = p_imp.detach().cpu()
+    record['p_attn'] = p_attn.detach().cpu()
+    record['p_full'] = p_full.detach().cpu()
+    record['p_imp_ood'] = p_imp_ood.detach().cpu()
+    # record['p_full_ood'] = p_ood.detach().cpu()
     record['p_pert'] = p_sum_pert.detach().cpu()
-
     record['pert_sents'] = document_sents
-    # staple decoder hidden states
-    # dec_hid_states = [x[0, -1].detach().cpu()
-    #   for x in sum_model_output['decoder_hidden_states']]
-    # record['dec_hid'] = dec_hid_states
-    # record['prefix'] = summary_prefix
-    # record['interest'] = interest
+    pert_top1, pert_var, pert_distb = feat_perturb(
+        p_sum_pert, p_full, distb_fix, device)
+    record['pert_top'] = pert_top1
+    record['pert_var'] = pert_var
+    record['pert_distb'] = pert_distb
+    top_lm = show_top_k(p_lm, summary_prefix, 'lm', tokenizer)
+    top_imp = show_top_k(p_imp, summary_prefix, 'imp', tokenizer)
+    top_full = show_top_k(p_full, summary_prefix, 'full', tokenizer)
+    top_impood = show_top_k(p_imp_ood, summary_prefix,
+                            'imp_ood', tokenizer=tokenizer)
+    # top_fullood = show_top_k(p_full_ood, summary_prefix, 'full_ood', tokenizer=tokenizer)
+    top_attn = show_top_k(p_attn, summary_prefix, 'attn', tokenizer)
+    record['top_lm'] = top_lm
+    record['top_imp'] = top_imp
+    record['top_full'] = top_full
+    record['top_impood'] = top_impood
+    record['top_attn'] = top_attn
     return record
 
 
@@ -88,35 +94,40 @@ def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, document_sents: L
 def src_attribute(step_data: List, input_doc_ids: torch.Tensor, document_str: str, uid: str, model_pkg: dict, device):
     """Source Attribution"""
     # input_doc_ids: [1, 400]
-
+    pkl_outputs, csv_outputs = [], []
+    csv_key = None
     # doc_tok_ids, doc_str, doc_str_lower = tokenize_text(
     #     model_pkg['tok'], document)
     # logger.debug(f"Example: {doc_str[:600]} ...")
-
-    """
-    pred_summary = gen_original_summary(
-        model_pkg['sum'], model_pkg['tok'], document, device)[0].strip()    # best summary from the model with beam search
-    
-    logger.info(f"Model output summary: {pred_summary}")
-    """
+    desired_key_for_csv = ['pert_distb', 'pert_var', 'pert_sents',
+                           'lm_imp', 'imp_cnn_imp', 'imp_full', 'token', 'pos',
+                           'top_lm', 'top_imp', 'top_full', 'top_impood', 'top_attn','t','T']
 
     document_sents = document_str.split("\n")
+    T = len(step_data)
     for idx, step in enumerate(step_data):
         prefix_token_ids = step['prefix_token_ids']
         prefix = step['prefix']
         tgt_token = step['tgt_token']
         record = _step_src_attr(input_ids=input_doc_ids, prefix_ids=prefix_token_ids,
                                 summary_prefix=prefix, document_sents=document_sents, model_pkg=model_pkg, device=device)
-
+        # record = record | step
+        record = {**record, **step}
         # 'prefix': summary_prefix,
         # 'query': interest
-        outputs.append(record)
+        record['t'] = idx
+        record['T'] = T
+        pkl_outputs.append(record)
 
-    # outputs.pop(-1)  # remove the EOS punct
-    # final = {
-    #     'data': outputs
-    # }
-    return outputs
+        trim_record = {}
+        for k, v in record.items():
+            if k in desired_key_for_csv:
+                trim_record[k] = v
+        k = list(trim_record.keys())
+        v = list(trim_record.values())
+        csv_outputs.append(v)
+        csv_key = k
+    return pkl_outputs, csv_key, csv_outputs
 
 
 if __name__ == '__main__':
@@ -128,13 +139,15 @@ if __name__ == '__main__':
     parser.add_argument("-mname_sum", default='facebook/bart-large-xsum')
     parser.add_argument("-batch_size", default=40)
     parser.add_argument('-max_samples', default=1000)
-    parser.add_argument('-truncate_sent', default=15,
-                        help='the max sent used for perturbation')
     parser.add_argument('-dir_meta', default='/mnt/data0/jcxu/meta_data_ref')
     parser.add_argument('-dir_save', default="/mnt/data0/jcxu/output_base",
                         help="The location to save output data. ")
+    parser.add_argument(
+        '-output_file', default='/mnt/data0/jcxu/output_file.csv')
     args = parser.parse_args()
     logger.info(args)
+    args.dir_save = args.dir_save + '_' + args.data_name
+    args.dir_meta = args.dir_meta + '_' + args.data_name
     if not os.path.exists(args.dir_save):
         os.makedirs(args.dir_save)
 
@@ -145,30 +158,44 @@ if __name__ == '__main__':
 
     # init BART models
 
-    model_lm, model_sum, model_sum_ood, bart_tokenizer = init_bart_family(
+    model_lm, model_sum, model_sum_ood, tokenizer = init_bart_family(
         args.mname_lm, args.mname_sum, device)
     logger.info("Done loading BARTs.")
     # sp_nlp = init_spacy()
-    model_pkg = {'lm': model_lm, 'sum': model_sum, 'ood': model_sum_ood, 'tok': bart_tokenizer}
-
+    model_pkg = {'lm': model_lm, 'sum': model_sum,
+                 'ood': model_sum_ood, 'tok': tokenizer}
+    distb_fix = init_vocab_distb_fix(tokenizer).float()
+    # device = 'cuda:1'
+    # device = 'cpu'
+    distb_fix = distb_fix.to(device)
     # {Do some perturbation to one example, run the model again, check if the token exist, write the result on the disk}
 
     feat_array = []
     model_prediction = []
     modified_text = []
     return_data = []
+    all_outs = []
     all_meta_files = os.listdir(args.dir_meta)
     try:
         for f in all_meta_files:
             outputs = []
+            exist = check_exist_file(args.dir_save, f)
+            if exist:
+                logger.debug(f"{f} already exists")
+                continue
             step_data, meta_data = read_meta_data(args.dir_meta, f)
             uid = meta_data['id']
             document = meta_data['document']
             doc_token_ids = meta_data['doc_token_ids'].to(device)
-            return_data = src_attribute(step_data, doc_token_ids,
-                          document, uid, model_pkg, device)
-
+            return_data, csv_key, csv_v = src_attribute(step_data, doc_token_ids,
+                                                        document, uid, model_pkg, device)
+            all_outs += csv_v
             write_pkl_to_disk(args.dir_save, fname_prefix=uid,
                               data_obj=return_data)
     except KeyboardInterrupt:
         logger.info('Done Collecting data ...')
+    # except:
+        # logger.info('Unexpected error')
+    df = pd.DataFrame(all_outs, columns=csv_key)
+    df.to_csv(args.output_file)
+    logger.info(f"write to {args.output_file}")

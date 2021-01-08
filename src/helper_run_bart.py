@@ -164,7 +164,7 @@ def run_full_model_slim(model, input_ids, attention_mask=None, decoder_input_ids
 
 def run_full_model(model, tokenizer, input_text: List[str], sum_prefix: List[str], encoder_outputs=None, device='cuda:0', output_attentions=False, output_dec_hid=False):
     if not encoder_outputs:
-        inputs = tokenizer(input_text, max_length=300,
+        inputs = tokenizer(input_text, max_length=500,
                            return_tensors='pt', truncation=True, padding=True)
         encoder_outputs = model.model.encoder(
             inputs['input_ids'].to(device), return_dict=True)

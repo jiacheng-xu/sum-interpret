@@ -77,7 +77,7 @@ if __name__ == "__main__":
                         help='the max sent used for perturbation')
     parser.add_argument('-dir_read', default='/mnt/data0/jcxu/meta_data_ref',
                         help="Path of the meta data to read.")
-    parser.add_argument('-dir_save', default="/mnt/data0/jcxu/output_ig",
+    parser.add_argument('-dir_save', default="/mnt/data0/jcxu/output_inpg",
                         help="The location to save output data. ")
     args = parser.parse_args()
     logger.info(args)

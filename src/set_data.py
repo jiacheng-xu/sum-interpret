@@ -8,7 +8,7 @@ from util import *
 
 from helper import get_sum_data
 from helper_run_bart import (
-    write_pkl_to_disk, init_spacy, extract_tokens, init_bart_family,gen_original_summary)
+    write_pkl_to_disk, init_spacy, extract_tokens, init_bart_family, gen_original_summary)
 
 if __name__ == '__main__':
 
@@ -22,10 +22,12 @@ if __name__ == '__main__':
     parser.add_argument('-dir_save', default="/mnt/data0/jcxu/meta_data_ref",
                         help="The location to save output data. ")
     parser.add_argument("-device", help="device to use", default='cuda:0')
+    parser.add_argument('-max_example', default=1000,
+                        help='The max number of examples (documents) to look at.')
     args = parser.parse_args()
     logger.info(args)
     device = args.device
-    
+    args.dir_save = f"{args.dir_save}_{args.data_name}"
     if not os.path.exists(args.dir_save):
         os.makedirs(args.dir_save)
 
@@ -42,13 +44,9 @@ if __name__ == '__main__':
         raise NotImplementedError
     sp_nlp = init_spacy()
     model_pkg = {'lm': model_lm, 'sum': model_sum,
-                 'ood': model_sum_ood, 'tok': tokenizer,'spacy':sp_nlp}
-    # {Do some perturbation to one example, run the model again, check if the token exist, write the result on the disk}
-    feat_array = []
-    model_prediction = []
-    modified_text = []
-    return_data = []
+                 'ood': model_sum_ood, 'tok': tokenizer, 'spacy': sp_nlp}
 
+    cnt = 0
     for data_point in dev_data:
         document = data_point['document']
         ref_summary = data_point['summary']
@@ -103,8 +101,11 @@ if __name__ == '__main__':
                      'doc_token_ids': input_doc['input_ids'],
                      'ref': ref_summary,
                      'summary': pred_summary,
-                     'id': uid} }
+                     'id': uid}}
 
         write_pkl_to_disk(args.dir_save, fname_prefix=uid, data_obj=final)
-
+        cnt += 1
+        if cnt > args.max_example:
+            logger.info(f"Early stop collecting {cnt}")
+            break
     logger.info('Done Collecting data ...')
