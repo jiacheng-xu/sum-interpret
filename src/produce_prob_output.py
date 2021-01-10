@@ -23,7 +23,7 @@ def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, document_sents: L
         [[0, 2] for _ in range(batch_size)]).to(device)
     # sum_model_output, p_sum = run_full_model(model_pkg['sum'], model_pkg['tok'], [document], device=device, sum_prefix=[summary_prefix], output_dec_hid=True)
     _, p_full, _ = run_full_model_slim(
-        model=model_pkg['sum'], input_ids=input_ids, attention_mask=None, decoder_input_ids=prefix_ids, targets=None
+        model=model_pkg['sum'], input_ids=input_ids, attention_mask=None, decoder_input_ids=prefix_ids, targets=None,device=device
     )
     # perturbation document_sents
     num_perturb_sent = len(document_sents)
@@ -44,7 +44,7 @@ def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, document_sents: L
         model_pkg['ood'], implicit_input, None, prefix_ids, None, device)
 
     _, p_ood, _ = run_full_model_slim(
-        model_pkg['ood'], input_ids=input_ids, attention_mask=None, decoder_input_ids=prefix_ids, targets=None)
+        model_pkg['ood'], input_ids=input_ids, attention_mask=None, decoder_input_ids=prefix_ids, targets=None,device=device)
 
     most_attn, p_attn = run_attn(
         model_pkg['sum'], input_ids=input_ids, prefix_ids=prefix_ids, device=device)
@@ -101,7 +101,7 @@ def src_attribute(step_data: List, input_doc_ids: torch.Tensor, document_str: st
     # logger.debug(f"Example: {doc_str[:600]} ...")
     desired_key_for_csv = ['pert_distb', 'pert_var', 'pert_sents',
                            'lm_imp', 'imp_cnn_imp', 'imp_full', 'token', 'pos',
-                           'top_lm', 'top_imp', 'top_full', 'top_impood', 'top_attn','t','T']
+                           'top_lm', 'top_imp', 'top_full', 'top_impood', 'top_attn','t','T','prefix','tgt_token']
 
     document_sents = document_str.split("\n")
     T = len(step_data)
@@ -117,6 +117,8 @@ def src_attribute(step_data: List, input_doc_ids: torch.Tensor, document_str: st
         # 'query': interest
         record['t'] = idx
         record['T'] = T
+        record['prefix'] = prefix
+        record['tgt_token']= tgt_token
         pkl_outputs.append(record)
 
         trim_record = {}
@@ -133,7 +135,7 @@ def src_attribute(step_data: List, input_doc_ids: torch.Tensor, document_str: st
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("-device", help="device to use", default='cuda:0')
+    parser.add_argument("-device", help="device to use", default='cuda:2')
     parser.add_argument("-data_name", default='xsum', help='name of dataset')
     parser.add_argument("-mname_lm", default='facebook/bart-large')
     parser.add_argument("-mname_sum", default='facebook/bart-large-xsum')

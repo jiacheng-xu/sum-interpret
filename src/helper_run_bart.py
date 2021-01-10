@@ -125,7 +125,7 @@ def get_cross_attention(cross_attn, input_ids, device, layer=-1):
 def run_full_model_slim(model, input_ids, attention_mask=None, decoder_input_ids=None, targets=None, device='cuda:0', output_dec_hid=False, output_attentions=False):
     decoder_input_ids = decoder_input_ids.to(device)
     input_ids = input_ids.to(device)
-    if attention_mask:
+    if attention_mask is not None:
         attention_mask = attention_mask.to(device)
     assert decoder_input_ids.size()[0] == input_ids.size()[0]
     model_inputs = {"input_ids": input_ids,

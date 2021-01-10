@@ -1,6 +1,6 @@
 from helper_run_bart import write_pkl_to_disk
 from transformers.modeling_outputs import BaseModelOutput
-from helper_run_bart import init_bart_sum_model,init_bart_family
+from helper_run_bart import init_bart_sum_model, init_bart_family
 from util import *
 from captum.attr import LayerIntegratedGradients, TokenReferenceBase
 import torch
@@ -150,6 +150,7 @@ def gen_ref_input(batch_size, seq_len, bos_token_id, pad_token_id, eos_token_id,
 
 def new_step_int_grad(input_ids, actual_word_id, prefix_token_ids, num_run_cut, model_pkg, device):
 
+    input_ids = input_ids[:,:400]
     batch_size, seq_len = input_ids.size()
     assert batch_size == 1
     # encode enc input
@@ -284,6 +285,8 @@ if __name__ == "__main__":
                         help="The location to save output data. ")
     args = parser.parse_args()
     logger.info(args)
+    args.dir_save = args.dir_save + '_' + args.data_name
+    args.dir_read = args.dir_read + '_' + args.data_name
     if not os.path.exists(args.dir_save):
         os.makedirs(args.dir_save)
     device = args.device
