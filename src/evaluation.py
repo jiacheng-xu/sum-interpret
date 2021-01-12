@@ -45,7 +45,10 @@ def yield_input_seq_random(bud, list_doc,is_lead=False, context_window=2, sep_to
         return_bpes += span_bpe
         bud -= 1
     return return_bpes
-
+def data_loader():
+    # gather the same length decoder prefix inputs, batch the input document
+    # sort the length of 
+    pass
 
 def run_eval(model_sum, docs, prefixs, tgts, metas):
     result_bag = []

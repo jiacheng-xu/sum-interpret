@@ -34,7 +34,7 @@ def tokenize_text(tokenizer, raw_string, max_len=500):
     return token_ids, doc_str, doc_str_lower
 
 
-def gen_original_summary(model, tokenizer, document, device, num_beams=4, max_length=30) -> List[str]:
+def gen_original_summary(model, tokenizer, document, device, num_beams=1, max_length=30) -> List[str]:
     token_ids, doc_str, doc_str_lower = tokenize_text(
         tokenizer=tokenizer, raw_string=document)
     summary_ids = model.generate(token_ids['input_ids'].to(

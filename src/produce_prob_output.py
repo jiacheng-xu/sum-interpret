@@ -9,8 +9,7 @@ from helper import *
 import string
 import torch.nn.functional as F
 
-anneal_options = [
-    0.9 ** i for i in range(5)] + [1.] + [1.1 ** i for i in range(5)]
+# anneal_options = [0.9 ** i for i in range(5)] + [1.] + [1.1 ** i for i in range(5)]
 
 
 def fix_logit(inp_logit, distb_fix, truncate_vocab_size=50264):
@@ -71,16 +70,13 @@ def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, document_sents: L
     implicit_input = torch.LongTensor(
         [[0, 2] for _ in range(batch_size)]).to(device)
     # sum_model_output, p_sum = run_full_model(model_pkg['sum'], model_pkg['tok'], [document], device=device, sum_prefix=[summary_prefix], output_dec_hid=True)
-    _, p_full, logit_full, _ = run_full_model_slim(
-        model=model_pkg['sum'], input_ids=input_ids, attention_mask=None, decoder_input_ids=prefix_ids, targets=None, device=device
+    _, p_full, logit_full, _ = run_full_model_slim(model=model_pkg['sum'], input_ids=input_ids, attention_mask=None, decoder_input_ids=prefix_ids, targets=None, device=device
     )
     # perturbation document_sents
     num_perturb_sent = len(document_sents)
-    sum_model_output_pert, p_sum_pert = run_full_model(
-        model_pkg['sum'], model_pkg['tok'], document_sents, device=device, sum_prefix=[summary_prefix] * num_perturb_sent, output_dec_hid=False)
+    sum_model_output_pert, p_sum_pert = run_full_model(model_pkg['sum'], model_pkg['tok'], document_sents, device=device, sum_prefix=[summary_prefix] * num_perturb_sent, output_dec_hid=False)
 
-    lm_output_topk, p_lm, logit_lm = run_lm(
-        model_pkg['lm'], model_pkg['tok'], device=device, sum_prefix=summary_prefix)
+    lm_output_topk, p_lm, logit_lm = run_lm(model_pkg['lm'], model_pkg['tok'], device=device, sum_prefix=summary_prefix)
     # lm_output_topk is a list of tokens
 
     # implicit_output, p_implicit = run_implicit(model_pkg['sum'], model_pkg['tok'], sum_prefix=summary_prefix, device=device)
@@ -102,15 +98,17 @@ def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, document_sents: L
     p_full = fix_distribution(p_full, distb_fix, device=device)
     p_imp_ood = fix_distribution(p_imp_ood, distb_fix, device=device)
     # p_full_ood = fix_distribution(p_full_ood, distb_fix, device=device)
+    # for attention, set <s> to be zero
+    p_attn[:,0] = 0
     p_attn = fix_distribution(p_attn, distb_fix, device=device)
     signature = ['lm', 'imp', 'full', 'imp_cnn',  'attn']
     distributions = [p_lm, p_imp, p_full, p_imp_ood,  p_attn]
 
     record = compute_group_deduct(distributions, signature)
     # record = compute_group_jaccard(distributions, signature)
-    new_record = compute_group_dyna_logits(
-        [logit_lm, logit_imp, logit_full, logit_imp_ood], logit_signatures=['lm', 'imp', 'full', 'imp_cnn'], distb_fix=distb_fix)
-    record = {**record, **new_record}
+    # new_record = compute_group_dyna_logits(
+    # [logit_lm, logit_imp, logit_full, logit_imp_ood], logit_signatures=['lm', 'imp', 'full', 'imp_cnn'], distb_fix=distb_fix)
+    # record = {**record, **new_record}
     record['p_lm'] = p_lm.detach().cpu()
     record['p_imp'] = p_imp.detach().cpu()
     record['p_attn'] = p_attn.detach().cpu()
@@ -153,7 +151,7 @@ def src_attribute(step_data: List, input_doc_ids: torch.Tensor, document_str: st
     # logger.debug(f"Example: {doc_str[:600]} ...")
     desired_key_for_csv = ['pert_distb', 'pert_var', 'pert_sents',
                            'lm_imp', 'imp_cnn_imp', 'imp_full',
-                           'lm2imp', 'imp_cnn2imp', 'imp2full',
+                        #    'lm2imp', 'imp_cnn2imp', 'imp2full',
                            'token', 'pos',
                            'top_lm', 'top_imp', 'top_full', 'top_impood', 'top_attn', 't', 'T', 'prefix', 'tgt_token']
 
@@ -188,24 +186,10 @@ def src_attribute(step_data: List, input_doc_ids: torch.Tensor, document_str: st
 
 if __name__ == '__main__':
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-device", help="device to use", default='cuda:2')
-    parser.add_argument("-data_name", default='xsum', help='name of dataset')
-    parser.add_argument("-mname_lm", default='facebook/bart-large')
-    parser.add_argument("-mname_sum", default='facebook/bart-large-xsum')
-    parser.add_argument("-batch_size", default=40)
-    parser.add_argument('-max_samples', default=1000)
-    parser.add_argument('-dir_meta', default='/mnt/data0/jcxu/meta_data_ref')
-    parser.add_argument('-dir_save', default="/mnt/data0/jcxu/output_base_test",
-                        help="The location to save output data. ")
-    parser.add_argument(
-        '-output_file', default='/mnt/data0/jcxu/output_file_test.csv')
+    parser = common_args()
     args = parser.parse_args()
     logger.info(args)
-    args.dir_save = args.dir_save + '_' + args.data_name
-    args.dir_meta = args.dir_meta + '_' + args.data_name
-    if not os.path.exists(args.dir_save):
-        os.makedirs(args.dir_save)
+    args = fix_args(args)
 
     # Run a PEGASUS/BART model to explain the local behavior
     # Sample one article from datasets
@@ -235,7 +219,7 @@ if __name__ == '__main__':
     try:
         for f in all_meta_files:
             outputs = []
-            exist = check_exist_file(args.dir_save, f)
+            exist = check_exist_file(args.dir_base, f)
             if exist:
                 logger.debug(f"{f} already exists")
                 continue
@@ -246,12 +230,14 @@ if __name__ == '__main__':
             return_data, csv_key, csv_v = src_attribute(step_data, doc_token_ids,
                                                         document, uid, model_pkg, device)
             all_outs += csv_v
-            write_pkl_to_disk(args.dir_save, fname_prefix=uid,
+            write_pkl_to_disk(args.dir_base, fname_prefix=uid,
                               data_obj=return_data)
+            df = pd.DataFrame(csv_v, columns=csv_key)
+            df.to_csv(os.path.join(args.dir_stat,uid+'.csv'))
     except KeyboardInterrupt:
         logger.info('Done Collecting data ...')
-    # except:
-        # logger.info('Unexpected error')
+
     df = pd.DataFrame(all_outs, columns=csv_key)
-    df.to_csv(args.output_file)
-    logger.info(f"write to {args.output_file}")
+    agg_file = os.path.join(args.dir_stat, 'meta.csv')
+    df.to_csv(agg_file)
+    logger.info(f"write to {agg_file}")

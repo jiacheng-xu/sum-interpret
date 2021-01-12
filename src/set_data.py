@@ -11,25 +11,15 @@ from helper_run_bart import (
     write_pkl_to_disk, init_spacy, extract_tokens, init_bart_family, gen_original_summary)
 
 if __name__ == '__main__':
+    parser = common_args()
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-model_family", default='bart')
-    parser.add_argument("-data_name", default='xsum', help='name of dataset')
-    parser.add_argument("-mname_lm", default='facebook/bart-large')
-    parser.add_argument("-mname_sum", default='facebook/bart-large-xsum')
-    parser.add_argument('-truncate_sent', default=20,
-                        help='the max sent used for perturbation')
-    parser.add_argument('-dir_save', default="/mnt/data0/jcxu/meta_data_ref",
-                        help="The location to save output data. ")
-    parser.add_argument("-device", help="device to use", default='cuda:0')
-    parser.add_argument('-max_example', default=1000,
-                        help='The max number of examples (documents) to look at.')
     args = parser.parse_args()
     logger.info(args)
     device = args.device
-    args.dir_save = f"{args.dir_save}_{args.data_name}"
-    if not os.path.exists(args.dir_save):
-        os.makedirs(args.dir_save)
+    args = fix_args(args)
+
+    if not os.path.exists(args.dir_meta):
+        os.makedirs(args.dir_meta)
 
     # Run a PEGASUS/BART model to explain the local behavior
     # Sample one article from datasets
@@ -53,8 +43,9 @@ if __name__ == '__main__':
         uid = data_point['id']
 
         document_sents = document.split('\n')[:args.truncate_sent]
+        document_sents = [s[:args.truncate_char] for s in document_sents]
         document = "\n".join(document_sents)
-        input_doc = tokenizer(document, return_tensors='pt')
+        input_doc = tokenizer(document, return_tensors='pt',max_length=500)
         pred_summary = gen_original_summary(
             model_pkg['sum'], model_pkg['tok'], document, device)[0].strip()    # best summary from the model with beam search
 
@@ -102,10 +93,10 @@ if __name__ == '__main__':
                      'ref': ref_summary,
                      'summary': pred_summary,
                      'id': uid}}
-
-        write_pkl_to_disk(args.dir_save, fname_prefix=uid, data_obj=final)
+        
+        write_pkl_to_disk(args.dir_meta, fname_prefix=uid, data_obj=final)
         cnt += 1
-        if cnt > args.max_example:
+        if cnt > args.max_example * 10:
             logger.info(f"Early stop collecting {cnt}")
             break
     logger.info('Done Collecting data ...')

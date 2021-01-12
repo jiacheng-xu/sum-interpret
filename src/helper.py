@@ -162,24 +162,19 @@ def compute_group_deduct(distb, distb_signature) -> Dict:
 def feat_perturb(p_pert, p_full, distb_fix, device):
     # p_pert batch, vocab
     # p_full vocab
-    try:
-        value, indices = torch.topk(p_full, k=1, dim=-1)
-        indi = indices.tolist()[0]
-        p_pert = fix_distribution(p_pert, distb_fix, device=device)
-        sel_values = p_pert[:, indi].tolist()
-        # print(sel_values)
-        assert len(sel_values) >= 1
-        top1 = max(sel_values)
 
-        max_value = max(sel_values)
+    value, indices = torch.topk(p_full, k=1, dim=-1)
+    indi = indices.tolist()[0]
+    p_pert = fix_distribution(p_pert, distb_fix, device=device)
+    sel_values = p_pert[:, indi].tolist()
+    # print(sel_values)
+    assert len(sel_values) >= 1
+    top1 = max(sel_values)
 
-        var = statistics.mean([abs(this_v - max_value)
-                               for this_v in sel_values])
-        # var = statistics.variance(sel_values)
-    except:
-        var = 0
-        top1 = 0,
-        sel_values = []
+    max_value = max(sel_values)
+
+    var = statistics.mean([abs(this_v - max_value)
+                            for this_v in sel_values])
     return top1, var, sel_values
 
 
