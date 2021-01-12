@@ -91,6 +91,42 @@ def fix_distribution(prob_distb, remapping_mat, truncate_vocab_size=50264, devic
     return mapped_prob
 
 
+def compute_group_jaccard(distb, distb_signature, k=1):
+    # distribution = [x.unsqueeze(0) for x in distb]
+    topk_indicies = [torch.topk(x, k=k) for x in distb]
+    l = len(distb)
+    # create source batch
+    src = []
+    src_sig = []
+    for idx in range(l):
+        src += [topk_indicies[idx]] * (l-1)
+        src_sig += [distb_signature[idx]] * (l-1)
+    tgt = []
+    tgt_sig = []
+    for idx in range(l):
+        for jdx in range(l):
+            if idx == jdx:
+                continue
+            tgt += [topk_indicies[jdx]]
+            tgt_sig += [distb_signature[jdx]]
+    assert len(src) == len(tgt)
+    distance = []
+    for idx in range(len(src)):
+        jac = len(src[idx] & tgt[idx]) / len(src[idx] | tgt[idx])
+        # print(jac)
+        distance.append(jac)
+    # klv = torch.sum(torch.abs(src - tgt), dim=-1).cpu().tolist()
+
+    # klv = batch_kl_value.mean(dim=-1).cpu().tolist()
+
+    name = [f"{x}_{y}" for (x, y) in zip(src_sig, tgt_sig)]
+    # Create a zip object from two lists
+    zipbObj = zip(name, distance)
+    # Create a dictionary from zip object
+    dictOfWords = dict(zipbObj)
+    return dictOfWords
+
+
 def compute_group_deduct(distb, distb_signature) -> Dict:
     log_distributions = [x.unsqueeze(0) for x in distb]
     l = len(log_distributions)
@@ -137,7 +173,8 @@ def feat_perturb(p_pert, p_full, distb_fix, device):
 
         max_value = max(sel_values)
 
-        var = statistics.mean([abs(this_v - max_value) for this_v in sel_values])
+        var = statistics.mean([abs(this_v - max_value)
+                               for this_v in sel_values])
         # var = statistics.variance(sel_values)
     except:
         var = 0

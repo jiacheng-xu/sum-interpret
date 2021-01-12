@@ -60,7 +60,7 @@ def extract_tokens(original_str, nlp):
     return tokens, tags
 
 
-def run_lm(model, tokenizer, device, sum_prefix="", topk=10):
+def run_lm(model, tokenizer, device, sum_prefix="", topk=10, T=1):
     sum_prefix = sum_prefix.strip()
     # Mask filling only works for bart-large
     # we basically remove all of the last step cases.
@@ -68,10 +68,12 @@ def run_lm(model, tokenizer, device, sum_prefix="", topk=10):
     input_ids = tokenizer([TXT], return_tensors='pt')['input_ids'].to(device)
     logits = model(input_ids, return_dict=True)['logits']
     masked_index = (input_ids[0] == tokenizer.mask_token_id).nonzero().item()
-    probs = logits[0, masked_index].softmax(dim=0)
+    # probs = logits[0, masked_index].softmax(dim=0)
+    probs = torch.nn.functional.softmax(logits[0, masked_index]/T, dim=0)
+
     values, predictions = probs.topk(topk)
     top_output = tokenizer.decode(predictions).split()
-    return top_output[0], probs
+    return top_output[0], probs,logits[0, masked_index]
 
 
 # def run_implicit(model, device, sum_prefix=""):
@@ -81,9 +83,10 @@ def run_lm(model, tokenizer, device, sum_prefix="", topk=10):
 #     return output, prob
 
 
-def run_attn(model,input_ids , prefix_ids, device='cuda:0'):
+def run_attn(model, input_ids, prefix_ids, device='cuda:0'):
     model.output_attentions = True
-    output, prob= run_full_model_slim(model,input_ids,None,decoder_input_ids=prefix_ids,output_attentions=True)
+    output, prob = run_full_model_slim(
+        model, input_ids, None, decoder_input_ids=prefix_ids, output_attentions=True, device=device)
     model.output_attentions = False  # reset
     return output, prob
 
@@ -122,7 +125,7 @@ def get_cross_attention(cross_attn, input_ids, device, layer=-1):
 
 
 @torch.no_grad()
-def run_full_model_slim(model, input_ids, attention_mask=None, decoder_input_ids=None, targets=None, device='cuda:0', output_dec_hid=False, output_attentions=False):
+def run_full_model_slim(model, input_ids, attention_mask=None, decoder_input_ids=None, targets=None, device='cuda:0', output_dec_hid=False, output_attentions=False, T=1):
     decoder_input_ids = decoder_input_ids.to(device)
     input_ids = input_ids.to(device)
     if attention_mask is not None:
@@ -133,7 +136,7 @@ def run_full_model_slim(model, input_ids, attention_mask=None, decoder_input_ids
                     "decoder_input_ids": decoder_input_ids,
                     }
     outputs = model(**model_inputs,
-                    output_hidden_states=output_dec_hid,output_attentions=output_attentions,
+                    output_hidden_states=output_dec_hid, output_attentions=output_attentions,
                     use_cache=False, return_dict=True)
 
     # batch, dec seq, vocab size
@@ -151,7 +154,8 @@ def run_full_model_slim(model, input_ids, attention_mask=None, decoder_input_ids
         output, p = get_cross_attention(
             outputs['cross_attentions'], input_ids, device=device)
         return output, p
-    prob = next_token_logits.softmax(dim=-1)
+    prob = torch.nn.functional.softmax(next_token_logits/T, dim=-1)
+    # prob = next_token_logits.softmax(dim=-1)
     next_token = torch.argmax(next_token_logits, dim=-1)
     # next_token = next_token.unsqueeze(-1)
     next_token = next_token.tolist()    # confrim nested list?
@@ -159,10 +163,10 @@ def run_full_model_slim(model, input_ids, attention_mask=None, decoder_input_ids
     output = [tokenizer.decode(tk) for tk in next_token]
     logging.info(f"Next token: {output}")
     outputs['output'] = output
-    return output, prob, loss
+    return output, prob, next_token_logits, loss
 
 
-def run_full_model(model, tokenizer, input_text: List[str], sum_prefix: List[str], encoder_outputs=None, device='cuda:0', output_attentions=False, output_dec_hid=False):
+def run_full_model(model, tokenizer, input_text: List[str], sum_prefix: List[str], encoder_outputs=None, device='cuda:0', output_attentions=False, output_dec_hid=False, T=1):
     if not encoder_outputs:
         inputs = tokenizer(input_text, max_length=500,
                            return_tensors='pt', truncation=True, padding=True)
@@ -203,7 +207,9 @@ def run_full_model(model, tokenizer, input_text: List[str], sum_prefix: List[str
     else:
         # batch, dec seq, vocab size
         next_token_logits = outputs.logits[:, -1, :]
-        prob = next_token_logits.softmax(dim=-1)
+        # prob = next_token_logits.softmax(dim=-1)
+        prob = torch.nn.functional.softmax(next_token_logits/T, dim=-1)
+
         next_token = torch.argmax(next_token_logits, dim=-1)
         # next_token = next_token.unsqueeze(-1)
         next_token = next_token.tolist()    # confrim nested list?
@@ -212,7 +218,6 @@ def run_full_model(model, tokenizer, input_text: List[str], sum_prefix: List[str
         logging.info(f"Next token: {output}")
         outputs['output'] = output
         return outputs, prob
-
 
 
 def init_bart_family(name_lm, name_sum, device, no_lm=False, no_ood=False):
@@ -227,7 +232,6 @@ def init_bart_family(name_lm, name_sum, device, no_lm=False, no_ood=False):
     else:
         sum_out_of_domain = None
     return lm_model, sum_model, sum_out_of_domain, tok
-
 
 
 def write_pkl_to_disk(path: str, fname_prefix: str, data_obj):

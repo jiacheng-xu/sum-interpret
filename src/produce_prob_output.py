@@ -7,6 +7,55 @@ from helper import get_sum_data
 from util import *
 from helper import *
 import string
+import torch.nn.functional as F
+
+anneal_options = [
+    0.9 ** i for i in range(5)] + [1.] + [1.1 ** i for i in range(5)]
+
+
+def fix_logit(inp_logit, distb_fix, truncate_vocab_size=50264):
+    inp_logit = inp_logit.squeeze()
+    # inp_logit = inp_logit.unsqueeze(0)
+    inp_logit = inp_logit[:truncate_vocab_size]
+    mapped_prob = torch.matmul(inp_logit, distb_fix)
+    mapped_prob = mapped_prob.unsqueeze(0)
+    return mapped_prob
+
+
+def compute_group_dyna_logits(logits, logit_signatures, distb_fix):
+
+    logits = [fix_logit(x, distb_fix) for x in logits]
+    softmax_version = [F.softmax(x) for x in logits]
+    anneal_version = [torch.cat([F.softmax(x/temp)
+                                 for temp in anneal_options]).unsqueeze(0) for x in logits]    # batch, 50264
+    src = []
+    src_sig = []
+    l = len(softmax_version)
+    for idx in range(l):
+        src += [anneal_version[idx]] * (l-1)
+        src_sig += [logit_signatures[idx]] * (l-1)
+    tgt = []
+    tgt_sig = []
+    for idx in range(l):
+        for jdx in range(l):
+            if idx == jdx:
+                continue
+            tgt += [softmax_version[jdx]]
+            tgt_sig += [logit_signatures[jdx]]
+    src = torch.cat(src)    # 12, 11, 50264
+    tgt = torch.cat(tgt)
+    tgt = tgt.unsqueeze(1)  # 12, 1, 50264
+    tgt = tgt.repeat((1, len(anneal_options), 1))
+    s = torch.sum(torch.abs(src - tgt), dim=-1)
+    min_s = torch.min(s, dim=-1)
+    min_s = min_s[0].cpu().tolist()  # 12
+
+    name = [f"{x}2{y}" for (x, y) in zip(src_sig, tgt_sig)]
+    # Create a zip object from two lists
+    zipbObj = zip(name, min_s)
+    # Create a dictionary from zip object
+    dictOfWords = dict(zipbObj)
+    return dictOfWords
 
 
 def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, document_sents: List[str], model_pkg, device):
@@ -17,34 +66,33 @@ def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, document_sents: L
     # print(summary_prefix)
     if not summary_prefix:
         summary_prefix = model_pkg['tok'].bos_token
-    input_ids = input_ids[:,:500]
+    input_ids = input_ids[:, :500]
     batch_size = input_ids.size()[0]
     implicit_input = torch.LongTensor(
         [[0, 2] for _ in range(batch_size)]).to(device)
     # sum_model_output, p_sum = run_full_model(model_pkg['sum'], model_pkg['tok'], [document], device=device, sum_prefix=[summary_prefix], output_dec_hid=True)
-    _, p_full, _ = run_full_model_slim(
-        model=model_pkg['sum'], input_ids=input_ids, attention_mask=None, decoder_input_ids=prefix_ids, targets=None,device=device
+    _, p_full, logit_full, _ = run_full_model_slim(
+        model=model_pkg['sum'], input_ids=input_ids, attention_mask=None, decoder_input_ids=prefix_ids, targets=None, device=device
     )
     # perturbation document_sents
     num_perturb_sent = len(document_sents)
     sum_model_output_pert, p_sum_pert = run_full_model(
         model_pkg['sum'], model_pkg['tok'], document_sents, device=device, sum_prefix=[summary_prefix] * num_perturb_sent, output_dec_hid=False)
 
-    lm_output_topk, p_lm = run_lm(
+    lm_output_topk, p_lm, logit_lm = run_lm(
         model_pkg['lm'], model_pkg['tok'], device=device, sum_prefix=summary_prefix)
     # lm_output_topk is a list of tokens
 
     # implicit_output, p_implicit = run_implicit(model_pkg['sum'], model_pkg['tok'], sum_prefix=summary_prefix, device=device)
-    _, p_imp, _ = run_full_model_slim(
-        model_pkg['sum'], implicit_input, None, prefix_ids, None, device=device)
+    _, p_imp, logit_imp, _ = run_full_model_slim(
+        model_pkg['sum'], implicit_input, None, prefix_ids, None, device=device, T=0.7)
 
     # Out of domain model
     # implicit_ood_output, p_implicit_ood = run_implicit(model_pkg['ood'], model_pkg['tok'], sum_prefix=summary_prefix, device=device)
-    _, p_imp_ood, _ = run_full_model_slim(
-        model_pkg['ood'], implicit_input, None, prefix_ids, None, device)
+    _, p_imp_ood, logit_imp_ood, _ = run_full_model_slim(
+        model_pkg['ood'], implicit_input, None, prefix_ids, None, device, T=0.7)
 
-    _, p_ood, _ = run_full_model_slim(
-        model_pkg['ood'], input_ids=input_ids, attention_mask=None, decoder_input_ids=prefix_ids, targets=None,device=device)
+    # _, p_ood, _ = run_full_model_slim(model_pkg['ood'], input_ids=input_ids, attention_mask=None, decoder_input_ids=prefix_ids, targets=None,device=device)
 
     most_attn, p_attn = run_attn(
         model_pkg['sum'], input_ids=input_ids, prefix_ids=prefix_ids, device=device)
@@ -57,8 +105,12 @@ def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, document_sents: L
     p_attn = fix_distribution(p_attn, distb_fix, device=device)
     signature = ['lm', 'imp', 'full', 'imp_cnn',  'attn']
     distributions = [p_lm, p_imp, p_full, p_imp_ood,  p_attn]
-    # result = compute_group_kl(distributions, signature)
+
     record = compute_group_deduct(distributions, signature)
+    # record = compute_group_jaccard(distributions, signature)
+    new_record = compute_group_dyna_logits(
+        [logit_lm, logit_imp, logit_full, logit_imp_ood], logit_signatures=['lm', 'imp', 'full', 'imp_cnn'], distb_fix=distb_fix)
+    record = {**record, **new_record}
     record['p_lm'] = p_lm.detach().cpu()
     record['p_imp'] = p_imp.detach().cpu()
     record['p_attn'] = p_attn.detach().cpu()
@@ -100,8 +152,10 @@ def src_attribute(step_data: List, input_doc_ids: torch.Tensor, document_str: st
     #     model_pkg['tok'], document)
     # logger.debug(f"Example: {doc_str[:600]} ...")
     desired_key_for_csv = ['pert_distb', 'pert_var', 'pert_sents',
-                           'lm_imp', 'imp_cnn_imp', 'imp_full', 'token', 'pos',
-                           'top_lm', 'top_imp', 'top_full', 'top_impood', 'top_attn','t','T','prefix','tgt_token']
+                           'lm_imp', 'imp_cnn_imp', 'imp_full',
+                           'lm2imp', 'imp_cnn2imp', 'imp2full',
+                           'token', 'pos',
+                           'top_lm', 'top_imp', 'top_full', 'top_impood', 'top_attn', 't', 'T', 'prefix', 'tgt_token']
 
     document_sents = document_str.split("\n")
     T = len(step_data)
@@ -118,7 +172,7 @@ def src_attribute(step_data: List, input_doc_ids: torch.Tensor, document_str: st
         record['t'] = idx
         record['T'] = T
         record['prefix'] = prefix
-        record['tgt_token']= tgt_token
+        record['tgt_token'] = tgt_token
         pkl_outputs.append(record)
 
         trim_record = {}
@@ -142,10 +196,10 @@ if __name__ == '__main__':
     parser.add_argument("-batch_size", default=40)
     parser.add_argument('-max_samples', default=1000)
     parser.add_argument('-dir_meta', default='/mnt/data0/jcxu/meta_data_ref')
-    parser.add_argument('-dir_save', default="/mnt/data0/jcxu/output_base",
+    parser.add_argument('-dir_save', default="/mnt/data0/jcxu/output_base_test",
                         help="The location to save output data. ")
     parser.add_argument(
-        '-output_file', default='/mnt/data0/jcxu/output_file.csv')
+        '-output_file', default='/mnt/data0/jcxu/output_file_test.csv')
     args = parser.parse_args()
     logger.info(args)
     args.dir_save = args.dir_save + '_' + args.data_name
