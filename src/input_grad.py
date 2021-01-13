@@ -10,7 +10,8 @@ from int_grad import forward_enc_dec_step, bart_decoder_forward_embed, summarize
 
 
 def step_input_grad(input_ids, actual_word_id, prefix_token_ids, model_pkg, device):
-    input_ids = input_ids[:, :400]
+    input_ids = torch.LongTensor(input_ids).to(device).unsqueeze(0)
+    # input_ids = input_ids[:, :400]
     batch_size, seq_len = input_ids.size()
     assert batch_size == 1
     # encode enc input
@@ -64,47 +65,32 @@ def step_input_grad(input_ids, actual_word_id, prefix_token_ids, model_pkg, devi
 
 
 if __name__ == "__main__":
+    parser = common_args()
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-device", help="device to use", default='cuda:1')
-    parser.add_argument("-data_name", default='xsum', help='name of dataset')
-    parser.add_argument("-mname_lm", default='facebook/bart-large')
-    parser.add_argument("-mname_sum", default='facebook/bart-large-xsum')
-    parser.add_argument("-batch_size", default=40)
-    parser.add_argument('-max_samples', default=1000)
-    parser.add_argument('-num_run_cut', default=50)
-    parser.add_argument('-truncate_sent', default=15,
-                        help='the max sent used for perturbation')
-    parser.add_argument('-dir_read', default='/mnt/data0/jcxu/meta_data_ref',
-                        help="Path of the meta data to read.")
-    parser.add_argument('-dir_save', default="/mnt/data0/jcxu/output_inpg",
-                        help="The location to save output data. ")
     args = parser.parse_args()
+    args = fix_args(args)
     logger.info(args)
-    args.dir_save = args.dir_save + '_' + args.data_name
-    args.dir_read = args.dir_read + '_' + args.data_name
-    if not os.path.exists(args.dir_save):
-        os.makedirs(args.dir_save)
+
     device = args.device
 
     model_lm, model_sum, model_sum_ood, tokenizer = init_bart_family(
         args.mname_lm, args.mname_sum, device, no_lm=True, no_ood=True)
     logger.info("Done loading BARTs.")
     model_pkg = {'sum': model_sum, 'tok': tokenizer}
-    all_files = os.listdir(args.dir_read)
+    all_files = os.listdir(args.dir_base)
     for f in all_files:
         outputs = []
-        step_data, meta_data = read_meta_data(args.dir_read, f)
+        step_data, meta_data = read_meta_data(args.dir_meta, f)
         uid = meta_data['id']
         for step in step_data:
-            inp_grad_result = step_input_grad(meta_data['doc_token_ids'], actual_word_id=step['tgt_token_id'],
-                                              prefix_token_ids=step['prefix_token_ids'], model_pkg=model_pkg, device=device)
-
+            inp_grad_result = step_input_grad(meta_data['doc_token_ids'], actual_word_id=step['tgt_token_id'], prefix_token_ids=step['prefix_token_ids'], model_pkg=model_pkg, device=device)
             result = inp_grad_result.squeeze(0).cpu().detach()
             outputs.append(result)
         skinny_meta = {
-            'doc_token_ids': meta_data['doc_token_ids'].squeeze(),
+            'doc_token_ids': meta_data['doc_token_ids'],
+            'map_index':meta_data['map_index'],
+            'sent_token_ids':meta_data['sent_token_ids'],
             'output': outputs
         }
-        write_pkl_to_disk(args.dir_save, uid, skinny_meta)
+        write_pkl_to_disk(args.dir_task, uid, skinny_meta)
         print(f"Done {uid}.pkl")

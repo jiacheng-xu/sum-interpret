@@ -4,32 +4,25 @@ from helper_run_bart import run_full_model_slim, init_bart_family
 from eval_util import *
 budget_ig = [0, 1, 2, 4]
 
-
-
-
-
-def data_loader():
-    # gather the same length decoder prefix inputs, batch the input document
-    # sort the length of
-    pass
-
-
-def run_eval(model_sum, docs, prefixs, tgts, metas):
+def run_eval(model_sum, data_feeder):
     result_bag = []
-    for d, p, t, m in zip(docs, prefixs, tgts, metas):
-        output_tok, output_prob, loss = run_full_model_slim(
+    for data_stream in data_feeder:
+        input_ids, attn_masks, gather_prefix, gather_tgt, gather_metas = data_stream
+        output_tok, _,_, loss = run_full_model_slim(
             model_sum,
-            input_ids=torch.LongTensor(d['input_ids']),
-            attention_mask=torch.tensor(d['attention_mask']), decoder_input_ids=p,
-            targets=torch.LongTensor(t),
+            input_ids=input_ids,
+            attention_mask=attn_masks,
+            decoder_input_ids=gather_prefix,
+            targets=gather_tgt,
             device=device)
-        list_d = d['input_ids']
         loss = loss.tolist()
-        result_bag.append(loss)
-        for idx, idk in enumerate(list_d):
-            print(
-                f"Loss:{loss[idx]}\tInput:{tokenizer.decode(idk)}\tOutput:{output_tok[idx]}")
-        print('')
+        result_bag.append({'loss': loss,
+                           'meta': gather_metas})
+        # result_bag.append(loss)
+        # for idx, idk in enumerate(list_d):
+        #     print(
+        #         f"Loss:{loss[idx]}\tInput:{tokenizer.decode(idk)}\tOutput:{output_tok[idx]}")
+        # print('')
 
     return result_bag
 
@@ -174,7 +167,6 @@ if __name__ == "__main__":
     logger.info("Done loading BARTs.")
     model_pkg = {'sum': model_sum, 'tok': tokenizer}
 
-    # tokenizer = BartTokenizer.from_pretrained('facebook/bart-large')
     all_files_base = os.listdir(args.dir_base)
     all_files_eval = os.listdir(args.dir_task)
     viable_files = list(set(all_files_base) & set(all_files_eval))
@@ -185,23 +177,20 @@ if __name__ == "__main__":
             outputs = []
             uid = f.split('.')[0]
             output_base_data = load_pickle(args.dir_base, f)
+            task_output = load_pickle(args.dir_task, f)
             step_data, meta_data = read_meta_data(args.dir_meta, f)
+
+            if args.task in ['int_grad', 'inp_grad']:
+                pack_data_inp = extract_from_task_output(
+                    task_output, step_data, args, budget_ig, device)
+                data_gen = batch_data(pack_data_inp, tokenizer, device)
+
             if args.task == 'random':
                 (return_groups, return_prefix, return_tgt, return_meta) = prepare_random(
                     output_base_data=output_base_data, meta_data=meta_data,
                     device=device, is_lead=True)
-            elif args.task == 'int_grad':
-                (return_groups, return_prefix, return_tgt, return_meta) = prepare_int_grad(
-                    dir=args.dir_task, fname=f, output_base_data=output_base_data, meta_data=meta_data,
-                    device=device)
-            elif args.task == 'inp_grad':
-                (return_groups, return_prefix, return_tgt, return_meta) = prepare_inp_grad(
-                    dir=args.dir_task, fname=f, output_base_data=output_base_data, meta_data=meta_data,
-                    device=device)
-            else:
-                raise NotImplementedError
-            this_result = run_eval(model_sum, return_groups,
-                                   return_prefix, return_tgt, return_meta)
+
+            this_result = run_eval(model_pkg['sum'], data_gen)
             all_result += this_result
     except KeyboardInterrupt:
         logger.info(f"Done {len(all_result)}")

@@ -5,7 +5,7 @@ from util import *
 from captum.attr import LayerIntegratedGradients, TokenReferenceBase
 import torch
 from captum.attr._utils.visualization import format_word_importances
-
+from helper import *
 
 def simple_viz_attribution(tokenizer, input_ids, attribution_scores):
     token_in_list = input_ids.tolist()
@@ -150,7 +150,9 @@ def gen_ref_input(batch_size, seq_len, bos_token_id, pad_token_id, eos_token_id,
 
 def new_step_int_grad(input_ids, actual_word_id, prefix_token_ids, num_run_cut, model_pkg, device):
 
-    input_ids = input_ids[:,:400]
+
+    input_ids = torch.LongTensor(input_ids).to(device).unsqueeze(0)
+    # input_ids = input_ids[:,:400]
     batch_size, seq_len = input_ids.size()
     assert batch_size == 1
     # encode enc input
@@ -269,47 +271,44 @@ def step_int_grad(interest: str, actual_word_id: int, summary_prefix: List[str],
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-device", help="device to use", default='cuda:0')
-    parser.add_argument("-data_name", default='xsum', help='name of dataset')
-    parser.add_argument("-mname_lm", default='facebook/bart-large')
-    parser.add_argument("-mname_sum", default='facebook/bart-large-xsum')
-    parser.add_argument("-batch_size", default=40)
-    parser.add_argument('-max_samples', default=1000)
-    parser.add_argument('-num_run_cut', default=50)
-    parser.add_argument('-truncate_sent', default=15,
-                        help='the max sent used for perturbation')
-    parser.add_argument('-dir_read', default='/mnt/data0/jcxu/meta_data_ref',
-                        help="Path of the meta data to read.")
-    parser.add_argument('-dir_save', default="/mnt/data0/jcxu/output_ig",
-                        help="The location to save output data. ")
+    parser = common_args()
+
     args = parser.parse_args()
+    args = fix_args(args)
     logger.info(args)
-    args.dir_save = args.dir_save + '_' + args.data_name
-    args.dir_read = args.dir_read + '_' + args.data_name
-    if not os.path.exists(args.dir_save):
-        os.makedirs(args.dir_save)
+
     device = args.device
 
     model_lm, model_sum, model_sum_ood, tokenizer = init_bart_family(
         args.mname_lm, args.mname_sum, device, no_lm=True, no_ood=True)
     logger.info("Done loading BARTs.")
     model_pkg = {'sum': model_sum, 'tok': tokenizer}
-    all_files = os.listdir(args.dir_read)
+    all_files = os.listdir(args.dir_base)
     for f in all_files:
         outputs = []
-        step_data, meta_data = read_meta_data(args.dir_read, f)
+        exist = check_exist_file(args.dir_task, f)
+        if exist:
+            logger.debug(f"{f} already exists")
+            continue
+        step_data, meta_data = read_meta_data(args.dir_meta, f)
         uid = meta_data['id']
+        print(f"Input size: {len(meta_data['doc_token_ids'])}")
+
+        # cut the input doc size to 500
+        original_input_doc = meta_data['doc_token_ids']
+        new_input_doc = original_input_doc[:500]
         for step in step_data:
-            ig_enc_result = new_step_int_grad(meta_data['doc_token_ids'], actual_word_id=step['tgt_token_id'], prefix_token_ids=step['prefix_token_ids'],
+            ig_enc_result = new_step_int_grad(new_input_doc, actual_word_id=step['tgt_token_id'], prefix_token_ids=step['prefix_token_ids'],
                                               num_run_cut=args.num_run_cut, model_pkg=model_pkg, device=device)
             ig_enc_result = ig_enc_result.squeeze(0).cpu().detach()
             outputs.append(ig_enc_result)
         skinny_meta = {
-            'doc_token_ids': meta_data['doc_token_ids'].squeeze(),
+            'doc_token_ids': new_input_doc,
+            'map_index':meta_data['map_index'],
+            'sent_token_ids':meta_data['sent_token_ids'],
             'output': outputs
         }
-        write_pkl_to_disk(args.dir_save, uid, skinny_meta)
+        write_pkl_to_disk(args.dir_task, uid, skinny_meta)
         print(f"Done {uid}.pkl")
 
     """

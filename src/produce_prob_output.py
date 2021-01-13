@@ -267,6 +267,7 @@ if __name__ == '__main__':
             if exist:
                 logger.debug(f"{f} already exists")
                 continue
+
             step_data, meta_data = read_meta_data(args.dir_meta, f)
             uid = meta_data['id']
 
@@ -275,7 +276,9 @@ if __name__ == '__main__':
             doc_token_ids = doc_token_ids.unsqueeze(0)
             doc_in_sentences = meta_data['sent_text']
             sent_token_ids = meta_data['sent_token_ids']
-
+            if len(sent_token_ids) <2:
+                continue
+            # print(f"{doc_token_ids.size()} {len(sent_token_ids)}")
             # doc_token_ids = meta_data['doc_token_ids'].to(device)
             return_data, csv_key, csv_v = src_attribute(
                 step_data, meta_data, doc_token_ids, sent_token_ids, doc_in_sentences, uid, model_pkg, device)

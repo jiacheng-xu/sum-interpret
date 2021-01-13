@@ -96,6 +96,8 @@ def common_args():
     parser.add_argument("-device", help="device to use", default='cuda:0')
     parser.add_argument('-max_example', default=5000,
                         help='The max number of examples (documents) to look at.')
+    parser.add_argument('-num_run_cut',default=40)
+    parser.add_argument('-eval_mode',dest='eval_mode',choices=eval_mode)
     return parser
 
 
