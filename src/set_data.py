@@ -5,10 +5,45 @@ import string
 
 from helper import get_summ_prefix
 from util import *
+import itertools
+from typing import List
 
 from helper import get_sum_data
 from helper_run_bart import (
     write_pkl_to_disk, init_spacy, extract_tokens, init_bart_family, gen_original_summary)
+
+
+def truncate_document(document: str, tokenizer, max_sent_num: int = 15, max_tok_num: int = 70, sent_sep_token_id=50118):
+    document_sents = document.split('\n')[:max_sent_num]
+    sent_tok_ids: List[List[int]] = []
+    sent_toks: List[str] = []
+
+    total_len = 0
+    for sent in document_sents:
+        toks = tokenizer.encode(
+            sent, add_special_tokens=False, max_length=max_tok_num, truncation=True)
+        recovered_text: str = tokenizer.decode(toks)
+        sent_tok_ids.append(toks)
+        sent_toks.append(recovered_text)
+        total_len += len(toks)
+        if total_len > 600:
+            break
+    # sent_tok_ids: List[List[int]]
+    # input_doc_token_ids: List[int]
+    input_doc_token_ids = [0]
+    map_of_sent_idx = [0]
+    for idx, sent_t in enumerate(sent_tok_ids):
+        if idx != 0:
+            input_doc_token_ids += [sent_sep_token_id]
+            map_of_sent_idx += [idx]
+
+        input_doc_token_ids += sent_t
+        l = len(sent_t)
+        map_of_sent_idx += [idx] * l
+    input_doc_token_ids += [2]
+    map_of_sent_idx += [idx]
+    return input_doc_token_ids, "\n".join(sent_toks), sent_tok_ids, sent_toks, map_of_sent_idx
+
 
 if __name__ == '__main__':
     parser = common_args()
@@ -41,13 +76,12 @@ if __name__ == '__main__':
         document = data_point['document']
         ref_summary = data_point['summary']
         uid = data_point['id']
-
-        document_sents = document.split('\n')[:args.truncate_sent]
-        document_sents = [s[:args.truncate_char] for s in document_sents]
-        document = "\n".join(document_sents)
-        input_doc = tokenizer(document, return_tensors='pt',max_length=500)
+        input_doc_token_ids, input_doc_str, sent_tok_ids, sent_list_str, map_tok_to_sent_idx = truncate_document(
+            document, tokenizer, args.truncate_sent, max_tok_num=args.truncate_word)
+        if len(input_doc_str)< 30:
+            continue
         pred_summary = gen_original_summary(
-            model_pkg['sum'], model_pkg['tok'], document, device)[0].strip()    # best summary from the model with beam search
+            model_pkg['sum'], model_pkg['tok'], input_doc_str, device)[0].strip()    # best summary from the model with beam search
 
         logger.info(f"Model output summary: {pred_summary}")
         print(f"Model output summary:{pred_summary}")
@@ -88,12 +122,15 @@ if __name__ == '__main__':
         outputs.pop(-1)  # remove the EOS punct
         final = {
             'data': outputs,
-            'meta': {'document': document,
-                     'doc_token_ids': input_doc['input_ids'],
+            'meta': {'document': input_doc_str,
+                     'doc_token_ids': input_doc_token_ids,
                      'ref': ref_summary,
                      'summary': pred_summary,
+                     'sent_token_ids': sent_tok_ids,
+                     'sent_text': sent_list_str,
+                     'map_index': map_tok_to_sent_idx,
                      'id': uid}}
-        
+
         write_pkl_to_disk(args.dir_meta, fname_prefix=uid, data_obj=final)
         cnt += 1
         if cnt > args.max_example * 10:

@@ -1,6 +1,7 @@
 # The main file. We are going to get source attribution and content attribution from this file.
 # After that, we can analyze the data and compile all the numbers
 
+from itertools import combinations
 from helper_run_bart import (gen_original_summary, init_bart_lm_model,
                              init_bart_sum_model, tokenize_text, extract_tokens, run_full_model, run_lm, init_spacy, run_attn, write_pkl_to_disk, run_full_model_slim, init_bart_family)
 from helper import get_sum_data
@@ -57,7 +58,28 @@ def compute_group_dyna_logits(logits, logit_signatures, distb_fix):
     return dictOfWords
 
 
-def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, document_sents: List[str], model_pkg, device):
+def prepare_perturbation_input(tokenizer, sent_text: List[str], device):
+    # tokenizer.prepare_seq2seq_batch(src_texts=x, return_tensors='pt')  -> input_ids, attention_mask
+    batch_enc = tokenizer.prepare_seq2seq_batch(
+        src_texts=sent_text, return_tensors='pt')
+    input_ids = batch_enc['input_ids'].to(device)
+    attention_mask = batch_enc['attention_mask'].to(device)
+    return input_ids, attention_mask
+
+
+def prepare_double_pertb(tokenizer, sent_text, device):
+    l = len(sent_text)
+    comb = list(combinations(range(l), 2))
+    combined_text = []
+    for c in comb:
+        combined = sent_text[c[0]] + '\n' + sent_text[c[1]]
+        combined_text.append(combined)
+    input_ids, attn = prepare_perturbation_input(
+        tokenizer, combined_text, device)
+    return input_ids, attn, comb
+
+
+def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, sent_texts: List[str], model_pkg, device):
     # print(f"start:{start_matching_index}\n{summary}")
     # summary_prefix = get_summ_prefix(
     #     tgt_token=interest.strip(), raw_output_summary=summary, start_matching_index=start_matching_index)
@@ -65,28 +87,34 @@ def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, document_sents: L
     # print(summary_prefix)
     if not summary_prefix:
         summary_prefix = model_pkg['tok'].bos_token
-    input_ids = input_ids[:, :500]
+
     batch_size = input_ids.size()[0]
     implicit_input = torch.LongTensor(
         [[0, 2] for _ in range(batch_size)]).to(device)
     # sum_model_output, p_sum = run_full_model(model_pkg['sum'], model_pkg['tok'], [document], device=device, sum_prefix=[summary_prefix], output_dec_hid=True)
-    _, p_full, logit_full, _ = run_full_model_slim(model=model_pkg['sum'], input_ids=input_ids, attention_mask=None, decoder_input_ids=prefix_ids, targets=None, device=device
-    )
-    # perturbation document_sents
-    num_perturb_sent = len(document_sents)
-    sum_model_output_pert, p_sum_pert = run_full_model(model_pkg['sum'], model_pkg['tok'], document_sents, device=device, sum_prefix=[summary_prefix] * num_perturb_sent, output_dec_hid=False)
+    _, p_full, logit_full, _ = run_full_model_slim(
+        model=model_pkg['sum'], input_ids=input_ids, attention_mask=None, decoder_input_ids=prefix_ids, targets=None, device=device)
 
-    lm_output_topk, p_lm, logit_lm = run_lm(model_pkg['lm'], model_pkg['tok'], device=device, sum_prefix=summary_prefix)
+    # perturbation document_sents
+    num_perturb_sent = len(sent_texts)
+    expand_prefix_ids = prefix_ids.repeat((num_perturb_sent, 1))
+    pert_input, pert_attn = prepare_perturbation_input(
+        model_pkg['tok'], sent_text=sent_texts, device=device)
+    _, p_sum_pert, _, _ = run_full_model_slim(
+        model=model_pkg['sum'], input_ids=pert_input, attention_mask=pert_attn, decoder_input_ids=expand_prefix_ids, targets=None, device=device)
+
+    lm_output_topk, p_lm, logit_lm = run_lm(
+        model_pkg['lm'], model_pkg['tok'], device=device, sum_prefix=summary_prefix)
     # lm_output_topk is a list of tokens
 
     # implicit_output, p_implicit = run_implicit(model_pkg['sum'], model_pkg['tok'], sum_prefix=summary_prefix, device=device)
     _, p_imp, logit_imp, _ = run_full_model_slim(
-        model_pkg['sum'], implicit_input, None, prefix_ids, None, device=device, T=0.7)
+        model_pkg['sum'], implicit_input, None, prefix_ids, None, device=device, T=1)
 
     # Out of domain model
     # implicit_ood_output, p_implicit_ood = run_implicit(model_pkg['ood'], model_pkg['tok'], sum_prefix=summary_prefix, device=device)
     _, p_imp_ood, logit_imp_ood, _ = run_full_model_slim(
-        model_pkg['ood'], implicit_input, None, prefix_ids, None, device, T=0.7)
+        model_pkg['ood'], implicit_input, None, prefix_ids, None, device, T=1)
 
     # _, p_ood, _ = run_full_model_slim(model_pkg['ood'], input_ids=input_ids, attention_mask=None, decoder_input_ids=prefix_ids, targets=None,device=device)
 
@@ -99,7 +127,7 @@ def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, document_sents: L
     p_imp_ood = fix_distribution(p_imp_ood, distb_fix, device=device)
     # p_full_ood = fix_distribution(p_full_ood, distb_fix, device=device)
     # for attention, set <s> to be zero
-    p_attn[:,0] = 0
+    p_attn[:, 0] = 0
     p_attn = fix_distribution(p_attn, distb_fix, device=device)
     signature = ['lm', 'imp', 'full', 'imp_cnn',  'attn']
     distributions = [p_lm, p_imp, p_full, p_imp_ood,  p_attn]
@@ -116,12 +144,28 @@ def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, document_sents: L
     record['p_imp_ood'] = p_imp_ood.detach().cpu()
     # record['p_full_ood'] = p_ood.detach().cpu()
     record['p_pert'] = p_sum_pert.detach().cpu()
-    record['pert_sents'] = document_sents
+    record['pert_sents'] = sent_texts
     pert_top1, pert_var, pert_distb = feat_perturb(
         p_sum_pert, p_full, distb_fix, device)
     record['pert_top'] = pert_top1
     record['pert_var'] = pert_var
     record['pert_distb'] = pert_distb
+
+    if pert_top1 < 0.5:
+        double_inp, double_attn, double_index = prepare_double_pertb(
+            model_pkg['tok'], sent_texts, device)
+        num_perturb_sent = len(double_index)
+        expand_double_prefix_ids = prefix_ids.repeat((num_perturb_sent, 1))
+        _, p_sum_pert_double, _, _ = run_full_model_slim(
+            model=model_pkg['sum'], input_ids=double_inp, attention_mask=double_attn, decoder_input_ids=expand_double_prefix_ids, targets=None, device=device)
+        # print(p_sum_pert_double)
+        pert_top1_double, pert_var_double, pert_distb_double = feat_perturb(
+            p_sum_pert_double, p_full, distb_fix, device)
+        record['pert_var_double'] = pert_var_double
+        record['pert_distb_double'] = pert_distb_double
+        record['pert_comb'] = double_index
+        record['pert_top1_double'] = pert_top1_double
+
     top_lm = show_top_k(p_lm, summary_prefix, 'lm', tokenizer)
     top_imp = show_top_k(p_imp, summary_prefix, 'imp', tokenizer)
     top_full = show_top_k(p_full, summary_prefix, 'full', tokenizer)
@@ -141,7 +185,7 @@ def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, document_sents: L
 
 
 @dec_print_wrap
-def src_attribute(step_data: List, input_doc_ids: torch.Tensor, document_str: str, uid: str, model_pkg: dict, device):
+def src_attribute(step_data: List, meta_data, input_doc_ids: torch.Tensor, sent_token_ids: List[List[int]], sent_texts: List[str], uid: str, model_pkg: dict, device):
     """Source Attribution"""
     # input_doc_ids: [1, 400]
     pkl_outputs, csv_outputs = [], []
@@ -151,18 +195,17 @@ def src_attribute(step_data: List, input_doc_ids: torch.Tensor, document_str: st
     # logger.debug(f"Example: {doc_str[:600]} ...")
     desired_key_for_csv = ['pert_distb', 'pert_var', 'pert_sents',
                            'lm_imp', 'imp_cnn_imp', 'imp_full',
-                        #    'lm2imp', 'imp_cnn2imp', 'imp2full',
+                           #    'lm2imp', 'imp_cnn2imp', 'imp2full',
                            'token', 'pos',
                            'top_lm', 'top_imp', 'top_full', 'top_impood', 'top_attn', 't', 'T', 'prefix', 'tgt_token']
 
-    document_sents = document_str.split("\n")
     T = len(step_data)
     for idx, step in enumerate(step_data):
         prefix_token_ids = step['prefix_token_ids']
         prefix = step['prefix']
         tgt_token = step['tgt_token']
-        record = _step_src_attr(input_ids=input_doc_ids, prefix_ids=prefix_token_ids,
-                                summary_prefix=prefix, document_sents=document_sents, model_pkg=model_pkg, device=device)
+        record = _step_src_attr(input_ids=input_doc_ids,    prefix_ids=prefix_token_ids,
+                                summary_prefix=prefix, sent_texts=sent_texts, model_pkg=model_pkg, device=device)
         # record = record | step
         record = {**record, **step}
         # 'prefix': summary_prefix,
@@ -171,6 +214,7 @@ def src_attribute(step_data: List, input_doc_ids: torch.Tensor, document_str: st
         record['T'] = T
         record['prefix'] = prefix
         record['tgt_token'] = tgt_token
+        record['map_index'] = meta_data['map_index']
         pkl_outputs.append(record)
 
         trim_record = {}
@@ -225,15 +269,21 @@ if __name__ == '__main__':
                 continue
             step_data, meta_data = read_meta_data(args.dir_meta, f)
             uid = meta_data['id']
-            document = meta_data['document']
-            doc_token_ids = meta_data['doc_token_ids'].to(device)
-            return_data, csv_key, csv_v = src_attribute(step_data, doc_token_ids,
-                                                        document, uid, model_pkg, device)
+
+            doc_token_ids = torch.LongTensor(
+                meta_data['doc_token_ids']).to(device)
+            doc_token_ids = doc_token_ids.unsqueeze(0)
+            doc_in_sentences = meta_data['sent_text']
+            sent_token_ids = meta_data['sent_token_ids']
+
+            # doc_token_ids = meta_data['doc_token_ids'].to(device)
+            return_data, csv_key, csv_v = src_attribute(
+                step_data, meta_data, doc_token_ids, sent_token_ids, doc_in_sentences, uid, model_pkg, device)
             all_outs += csv_v
             write_pkl_to_disk(args.dir_base, fname_prefix=uid,
                               data_obj=return_data)
             df = pd.DataFrame(csv_v, columns=csv_key)
-            df.to_csv(os.path.join(args.dir_stat,uid+'.csv'))
+            df.to_csv(os.path.join(args.dir_stat, uid+'.csv'))
     except KeyboardInterrupt:
         logger.info('Done Collecting data ...')
 
