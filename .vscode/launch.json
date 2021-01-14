@@ -7,7 +7,7 @@
         {
             "name": "Python: Current File",
             "args": [
-                "-task=inp_grad", "-eval_mode=sel_sent"
+                "-task=random", "-eval_mode=sel_sent","-device=cuda:3"
             ],
             "type": "python",
             "request": "launch",

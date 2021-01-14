@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from typing import List
 from helper import *
 from util import *
@@ -93,6 +94,34 @@ def yield_random_rank(input_doc):
     pass
 
 
+def summarize_result(result: List[dict], args):
+    loss_dict = {}
+    task = args.task
+    for r in result:
+        loss = r['loss']
+        meta = r['meta']
+        for l, m in zip(loss, meta):
+            mode = m['mode']
+            bud = m['bud']
+            if bud in loss_dict:
+                loss_dict[bud].append(l)
+            else:
+                loss_dict[bud] = [l]
+
+    for k, v in loss_dict.items():
+        avg_v = statistics.mean(v)
+        loss_dict[k] = avg_v
+    od = OrderedDict(sorted(loss_dict.items()))
+    keys = list(od.keys())
+    values = list(od.values())
+    print(f"Task: {task};Mode: {mode}")
+    keys = [str(k) for k in keys]
+    values = [str(v) for v in values]
+    print(",".join(keys))
+    print(",".join(values))
+    out = [task, mode,",".join(keys),",".join(values)]
+    return ",".join(out)
+
 def agg_time_step_task_output(seq_of_pred: List[torch.Tensor], device):
     if len(seq_of_pred[0].size()) < 2:
         seq_of_pred = [x.unsqueeze(0) for x in seq_of_pred]
@@ -120,29 +149,27 @@ def comp_sent_avg_activation(pred: List[float], map_index):
             for i in sorted(enumerate(mean_score), key=lambda x:x[1])][::-1]
     return rank, total_sents_to_consider
 
-
-def extract_from_task_output(task_output, step_data, args, budget: List[int], device):
-    # 'doc_token_ids': new_input_doc,
-    # 'map_index':meta_data['map_index'],
-    # 'sent_token_ids':meta_data['sent_token_ids'],
-    # 'output': outputs
-    document_tokens = task_output['doc_token_ids']
-    map_index = task_output['map_index']
-    sent_token_ids = task_output['sent_token_ids']
-    pred_output = task_output['output']
+def extract_from_baseline(meta_data, step_data, args, budget: List[int], device):
+    # document_tokens = task_output['doc_token_ids']
+    map_index = meta_data['map_index']
+    sent_token_ids = meta_data['sent_token_ids']
     eval_mode = args.eval_mode
-    agg_pred_output = agg_time_step_task_output(pred_output, device)
+
     return_data = []
     # for token, get index of token to add or remove
     if 'sent' in eval_mode:
         # aggeragate units in sent
-        agg_pred_output = agg_pred_output.cpu().tolist()
 
-        for t, step_pred in enumerate(agg_pred_output):
-
+        for t, step in enumerate(step_data):
             # first element is the index of the top 1 sent
-            rank_of_sent_index, total_sents_to_consider = comp_sent_avg_activation(
-                step_pred, map_index)
+            total_sents_to_consider = len(sent_token_ids)
+            sent_ids = list(range(total_sents_to_consider))
+            if args.task == 'random':
+                random.shuffle(sent_ids)
+                rank_of_sent_index = sent_ids
+            elif args.task == 'lead':
+                rank_of_sent_index = sent_ids
+
             if 'sel' in eval_mode:
                 for bud in budget:
                     rendered_tokens = render_sel_sent(
@@ -160,9 +187,77 @@ def extract_from_task_output(task_output, step_data, args, budget: List[int], de
                         }
                     })
             else:
-                rendered_tokens = render_rm_sent(sel_budget=bud, list_sent_tokens=sent_token_ids,
+                for bud in budget:
+                    rendered_tokens = render_rm_sent(sel_budget=bud, list_sent_tokens=sent_token_ids,
                                                  top_indicies=rank_of_sent_index, total_num_sent=total_sents_to_consider)
-                return_data.append({
+                    return_data.append({
+                    "inp": rendered_tokens,  # List without <s> and eos
+                    # [1, l] tensor
+                    "prefix": step_data[t]['prefix_token_ids'],
+                    "tgt": step_data[t]['tgt_token_id'],
+                    "meta": {
+                        'prefix': step_data[t]['prefix'],
+                        'token': step_data[t]['token'],
+                        'pos': step_data[t]['pos'],
+                        'bud': bud,
+                        'mode': eval_mode
+                    }
+                })
+    elif 'tok' in eval_mode:
+        _, rank = torch.topk(agg_pred_output, k=max(budget)*2, dim=-1)
+        rank = rank.cpu().tolist()
+
+    return return_data
+def extract_from_task_output(task_output, step_data, args, budget: List[int], device):
+    # 'doc_token_ids': new_input_doc,
+    # 'map_index':meta_data['map_index'],
+    # 'sent_token_ids':meta_data['sent_token_ids'],
+    # 'output': outputs
+    document_tokens = task_output['doc_token_ids']
+    map_index = task_output['map_index']
+    sent_token_ids = task_output['sent_token_ids']
+    pred_output = task_output['output']
+    eval_mode = args.eval_mode
+    agg_pred_output = agg_time_step_task_output(pred_output, device)
+    return_data = []
+    # for token, get index of token to add or remove
+    if 'sent' in eval_mode:
+        # aggeragate units in sent
+        agg_pred_output = agg_pred_output.cpu().tolist()
+        for t, step_pred in enumerate(agg_pred_output):
+            # first element is the index of the top 1 sent
+            total_sents_to_consider = len(sent_token_ids)
+            sent_ids = list(range(total_sents_to_consider))
+            if args.task == 'random':
+                random.shuffle(sent_ids)
+                rank_of_sent_index = sent_ids
+            elif args.task == 'lead':
+                rank_of_sent_index = sent_ids
+            else:
+                rank_of_sent_index, total_sents_to_consider = comp_sent_avg_activation(
+                    step_pred, map_index)
+
+            if 'sel' in eval_mode:
+                for bud in budget:
+                    rendered_tokens = render_sel_sent(
+                        sel_budget=bud, list_sent_tokens=sent_token_ids, top_indicies=rank_of_sent_index)
+                    return_data.append({
+                        "inp": rendered_tokens,
+                        "prefix": step_data[t]['prefix_token_ids'],
+                        "tgt": step_data[t]['tgt_token_id'],
+                        "meta": {
+                            'prefix': step_data[t]['prefix'],
+                            'token': step_data[t]['token'],
+                            'pos': step_data[t]['pos'],
+                            'bud': bud,
+                            'mode': eval_mode
+                        }
+                    })
+            else:
+                for bud in budget:
+                    rendered_tokens = render_rm_sent(sel_budget=bud, list_sent_tokens=sent_token_ids,
+                                                 top_indicies=rank_of_sent_index, total_num_sent=total_sents_to_consider)
+                    return_data.append({
                     "inp": rendered_tokens,  # List without <s> and eos
                     # [1, l] tensor
                     "prefix": step_data[t]['prefix_token_ids'],
