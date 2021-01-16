@@ -135,6 +135,10 @@ def run_full_model_slim(model, input_ids, attention_mask=None, decoder_input_ids
                     "attention_mask": attention_mask,
                     "decoder_input_ids": decoder_input_ids,
                     }
+    # print(input_ids.size())
+    # print(torch.max(input_ids))
+    # print(decoder_input_ids.device)
+    # exit()
     outputs = model(**model_inputs,
                     output_hidden_states=output_dec_hid, output_attentions=output_attentions,
                     use_cache=False, return_dict=True)
@@ -161,8 +165,8 @@ def run_full_model_slim(model, input_ids, attention_mask=None, decoder_input_ids
     next_token = next_token.tolist()    # confrim nested list?
     # print(f"Gold: {tokenizer.decode(targets[0].item())}")
     output = [tokenizer.decode(tk) for tk in next_token]
-    logging.info(f"Next token: {output}")
-    outputs['output'] = output
+    # logging.info(f"Next token: {output}")
+    # outputs['output'] = output
     return output, prob, next_token_logits, loss
 
 

@@ -73,8 +73,20 @@ def read_meta_data(dir, fname):
     return data, meta
 
 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
 def common_args():
-    task_choice = ['inp_grad', 'int_grad', 'random', 'occu', 'lime', 'lead']
+
+    task_choice = ['inp_grad', 'int_grad', 'random', 'occ', 'lime', 'lead']
     eval_mode = ['sel_tok', 'rm_tok', 'sel_sent', 'rm_sent']
     settings = ['ctx', 'ctx-novel', 'ctx-fusion', 'lm', 'ctx-hard']
 
@@ -91,13 +103,16 @@ def common_args():
         '-dir_meta', default="/mnt/data0/jcxu/meta_pred", help="The location to meta data.")
     parser.add_argument('-dir_base', default="/mnt/data0/jcxu/output_base")
     parser.add_argument('-dir_stat', default="/mnt/data0/jcxu/csv")
-
+    parser.add_argument("--debug", type=str2bool, nargs='?',
+                        const=True, default=False,
+                        help="Activate debug mode.")
     parser.add_argument("-task", dest='task', choices=task_choice)
     parser.add_argument("-device", help="device to use", default='cuda:0')
     parser.add_argument('-max_example', default=5000,
                         help='The max number of examples (documents) to look at.')
-    parser.add_argument('-num_run_cut',default=40)
-    parser.add_argument('-eval_mode',dest='eval_mode',choices=eval_mode)
+    parser.add_argument('-num_run_cut', default=40)
+    parser.add_argument('-batch_size', default=100,type=int)
+    parser.add_argument('-eval_mode', dest='eval_mode', choices=eval_mode)
     return parser
 
 
@@ -105,6 +120,9 @@ def fix_args(args):
     args.dir_base = add_dataname_to_suffix(args, args.dir_base)
     args.dir_meta = add_dataname_to_suffix(args, args.dir_meta)
     args.dir_stat = add_dataname_to_suffix(args, args.dir_stat)
+    if args.debug:
+        args.device = 'cpu'
+        args.mname_sum = 'sshleifer/distilbart-xsum-6-6'
     if hasattr(args, 'task'):
         args.dir_task = f"/mnt/data0/jcxu/task_{args.task}"
         args.dir_task = add_dataname_to_suffix(args, args.dir_task)

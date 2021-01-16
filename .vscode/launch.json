@@ -6,10 +6,12 @@
     "configurations": [
         {
             "name": "Python: Current File",
-            "args": [
-                "-task=random", "-eval_mode=sel_sent","-device=cuda:3"
-            ],
             "type": "python",
+            "args": [
+                "-task=occ",
+                "-eval_mode=sel_tok",
+                "-device=cuda:1",
+            ],
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal"

@@ -249,7 +249,6 @@ if __name__ == '__main__':
     model_pkg = {'lm': model_lm, 'sum': model_sum,
                  'ood': model_sum_ood, 'tok': tokenizer}
     distb_fix = init_vocab_distb_fix(tokenizer).float()
-    # device = 'cuda:1'
     # device = 'cpu'
     distb_fix = distb_fix.to(device)
     # {Do some perturbation to one example, run the model again, check if the token exist, write the result on the disk}
@@ -276,17 +275,20 @@ if __name__ == '__main__':
             doc_token_ids = doc_token_ids.unsqueeze(0)
             doc_in_sentences = meta_data['sent_text']
             sent_token_ids = meta_data['sent_token_ids']
-            if len(sent_token_ids) <2:
+            if len(sent_token_ids) < 2:
                 continue
             # print(f"{doc_token_ids.size()} {len(sent_token_ids)}")
             # doc_token_ids = meta_data['doc_token_ids'].to(device)
-            return_data, csv_key, csv_v = src_attribute(
-                step_data, meta_data, doc_token_ids, sent_token_ids, doc_in_sentences, uid, model_pkg, device)
-            all_outs += csv_v
-            write_pkl_to_disk(args.dir_base, fname_prefix=uid,
+            try:
+                return_data, csv_key, csv_v = src_attribute(step_data, meta_data, doc_token_ids, sent_token_ids, doc_in_sentences, uid, model_pkg, device)
+                all_outs += csv_v
+                write_pkl_to_disk(args.dir_base, fname_prefix=uid,
                               data_obj=return_data)
-            df = pd.DataFrame(csv_v, columns=csv_key)
-            df.to_csv(os.path.join(args.dir_stat, uid+'.csv'))
+                df = pd.DataFrame(csv_v, columns=csv_key)
+                df.to_csv(os.path.join(args.dir_stat, uid+'.csv'))
+            except IndexError:
+                print("skiiping")
+            
     except KeyboardInterrupt:
         logger.info('Done Collecting data ...')
 
