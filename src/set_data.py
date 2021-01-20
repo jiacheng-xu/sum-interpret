@@ -3,7 +3,7 @@
 
 import string
 
-from helper import get_summ_prefix
+from helper import get_summ_prefix,check_exist_file
 from util import *
 import itertools
 from typing import List
@@ -76,6 +76,10 @@ if __name__ == '__main__':
         document = data_point['document']
         ref_summary = data_point['summary']
         uid = data_point['id']
+        exist = check_exist_file(args.dir_meta, uid+'.pkl')
+        if exist:
+            print('Exist')
+            continue
         input_doc_token_ids, input_doc_str, sent_tok_ids, sent_list_str, map_tok_to_sent_idx = truncate_document(
             document, tokenizer, args.truncate_sent, max_tok_num=args.truncate_word)
         if len(input_doc_str)< 30:

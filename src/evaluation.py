@@ -1,4 +1,5 @@
 # batch evaluation
+from helper_run_bart import write_pkl_to_disk
 import time
 import datetime
 from util import *
@@ -96,26 +97,29 @@ if __name__ == "__main__":
     else:
         all_files_eval = os.listdir(args.dir_task)
         viable_files = list(set(all_files_base) & set(all_files_eval))
-    viable_files = viable_files[:500]
+    viable_files = viable_files[:50]
     all_result = []
     try:
         for f in viable_files:
-            outputs = []
-            uid = f.split('.')[0]
-            output_base_data = load_pickle(args.dir_base, f)
-            step_data, meta_data = read_meta_data(args.dir_meta, f)
-            if args.task in ['int_grad', 'inp_grad']:
-                task_output = load_pickle(args.dir_task, f)
-                pack_data_inp = extract_from_task_output(
-                    task_output, meta_data, step_data, args, budget_ig, device)
-            elif args.task in ['random', 'lead']:
-                pack_data_inp = extract_from_baseline(
-                    meta_data, step_data, args, budget_ig, device)
-            data_gen = batch_data(pack_data_inp, tokenizer, device)
-            if random.random() < 0.1:
-                print("working ...")
-            this_result = run_eval(model_pkg['sum'], data_gen)
-
+            try:
+                uid = f.split('.')[0]
+                output_base_data = load_pickle(args.dir_base, f)
+                step_data, meta_data = read_meta_data(args.dir_meta, f)
+                if args.task in ['int_grad', 'inp_grad']:
+                    task_output = load_pickle(args.dir_task, f)
+                    pack_data_inp = extract_from_task_output(
+                        task_output, meta_data, step_data, args, budget_ig, device)
+                elif args.task in ['random', 'lead']:
+                    pack_data_inp = extract_from_baseline(
+                        meta_data, step_data, args, budget_ig, device)
+                data_gen = batch_data(pack_data_inp, tokenizer, device)
+                if random.random() < 0.1:
+                    print("working ...")
+                this_result = run_eval(model_pkg['sum'], data_gen)
+            except RuntimeError:
+                logger.warn(f"Runtime error captured in {uid}")
+            # write evaluation output to disk to reuse
+            write_pkl_to_disk(args.dir_eval_save, uid, this_result)
             all_result += this_result
     except KeyboardInterrupt:
         logger.info(f"Done {len(all_result)}")

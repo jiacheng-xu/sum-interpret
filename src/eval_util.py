@@ -173,7 +173,6 @@ def comp_sent_avg_activation(pred: List[float], map_index):
     return rank, total_sents_to_consider
 
 
-
 def extract_from_baseline(meta_data, step_data, args, budget: List[int], device):
     document_tokens = meta_data['doc_token_ids']
     map_index = meta_data['map_index']
@@ -255,9 +254,11 @@ def assemble_units(rendered_tokens, step_data, t, bud, eval_mode, meta_data):
         }
     }
     return d
+
+
 def argsort(seq):
-    # http://stackoverflow.com/questions/3071415/efficient-method-to-calculate-the-rank-vector-of-a-list-in-python
     return sorted(range(len(seq)), key=seq.__getitem__)
+
 
 def extract_from_task_output(task_output, meta_data, step_data, args, budget: List[int], device):
     # 'doc_token_ids': new_input_doc,
@@ -320,11 +321,3 @@ def extract_from_task_output(task_output, meta_data, step_data, args, budget: Li
                     return_data.append(unit)
     return return_data
 
-
-def prepare_eval_input():
-    # Extract data from model output
-    # Prepare data: padding, batching
-    # Which Mode, sel/rm, sent/tok
-    # Run model
-    # record, output, save
-    pass

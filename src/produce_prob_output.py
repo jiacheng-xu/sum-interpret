@@ -79,7 +79,7 @@ def prepare_double_pertb(tokenizer, sent_text, device):
     return input_ids, attn, comb
 
 
-def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, sent_texts: List[str], model_pkg, device):
+def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, sent_texts: List[str], model_pkg, device, temperature=1):
     # print(f"start:{start_matching_index}\n{summary}")
     # summary_prefix = get_summ_prefix(
     #     tgt_token=interest.strip(), raw_output_summary=summary, start_matching_index=start_matching_index)
@@ -93,7 +93,7 @@ def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, sent_texts: List[
         [[0, 2] for _ in range(batch_size)]).to(device)
     # sum_model_output, p_sum = run_full_model(model_pkg['sum'], model_pkg['tok'], [document], device=device, sum_prefix=[summary_prefix], output_dec_hid=True)
     _, p_full, logit_full, _ = run_full_model_slim(
-        model=model_pkg['sum'], input_ids=input_ids, attention_mask=None, decoder_input_ids=prefix_ids, targets=None, device=device)
+        model=model_pkg['sum'], input_ids=input_ids, attention_mask=None, decoder_input_ids=prefix_ids, targets=None, device=device, T=temperature)
 
     # perturbation document_sents
     num_perturb_sent = len(sent_texts)
@@ -101,20 +101,20 @@ def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, sent_texts: List[
     pert_input, pert_attn = prepare_perturbation_input(
         model_pkg['tok'], sent_text=sent_texts, device=device)
     _, p_sum_pert, _, _ = run_full_model_slim(
-        model=model_pkg['sum'], input_ids=pert_input, attention_mask=pert_attn, decoder_input_ids=expand_prefix_ids, targets=None, device=device)
+        model=model_pkg['sum'], input_ids=pert_input, attention_mask=pert_attn, decoder_input_ids=expand_prefix_ids, targets=None, device=device, T=temperature)
 
     lm_output_topk, p_lm, logit_lm = run_lm(
-        model_pkg['lm'], model_pkg['tok'], device=device, sum_prefix=summary_prefix)
+        model_pkg['lm'], model_pkg['tok'], device=device, sum_prefix=summary_prefix,  T=temperature)
     # lm_output_topk is a list of tokens
 
     # implicit_output, p_implicit = run_implicit(model_pkg['sum'], model_pkg['tok'], sum_prefix=summary_prefix, device=device)
     _, p_imp, logit_imp, _ = run_full_model_slim(
-        model_pkg['sum'], implicit_input, None, prefix_ids, None, device=device, T=1)
+        model_pkg['sum'], implicit_input, None, prefix_ids, None, device=device,  T=temperature)
 
     # Out of domain model
     # implicit_ood_output, p_implicit_ood = run_implicit(model_pkg['ood'], model_pkg['tok'], sum_prefix=summary_prefix, device=device)
     _, p_imp_ood, logit_imp_ood, _ = run_full_model_slim(
-        model_pkg['ood'], implicit_input, None, prefix_ids, None, device, T=1)
+        model_pkg['ood'], implicit_input, None, prefix_ids, None, device , T=temperature)
 
     # _, p_ood, _ = run_full_model_slim(model_pkg['ood'], input_ids=input_ids, attention_mask=None, decoder_input_ids=prefix_ids, targets=None,device=device)
 
@@ -185,7 +185,7 @@ def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, sent_texts: List[
 
 
 @dec_print_wrap
-def src_attribute(step_data: List, meta_data, input_doc_ids: torch.Tensor, sent_token_ids: List[List[int]], sent_texts: List[str], uid: str, model_pkg: dict, device):
+def src_attribute(step_data: List, meta_data, input_doc_ids: torch.Tensor, sent_token_ids: List[List[int]], sent_texts: List[str], uid: str, model_pkg: dict, device, temperature=1):
     """Source Attribution"""
     # input_doc_ids: [1, 400]
     pkl_outputs, csv_outputs = [], []
@@ -204,7 +204,7 @@ def src_attribute(step_data: List, meta_data, input_doc_ids: torch.Tensor, sent_
         prefix_token_ids = step['prefix_token_ids']
         prefix = step['prefix']
         tgt_token = step['tgt_token']
-        record = _step_src_attr(input_ids=input_doc_ids,    prefix_ids=prefix_token_ids,
+        record = _step_src_attr(input_ids=input_doc_ids, temperature=temperature,   prefix_ids=prefix_token_ids,
                                 summary_prefix=prefix, sent_texts=sent_texts, model_pkg=model_pkg, device=device)
         # record = record | step
         record = {**record, **step}
@@ -259,6 +259,7 @@ if __name__ == '__main__':
     return_data = []
     all_outs = []
     all_meta_files = os.listdir(args.dir_meta)
+    # all_meta_files.insert(0,'37854358.pkl')
     try:
         for f in all_meta_files:
             outputs = []
@@ -280,15 +281,16 @@ if __name__ == '__main__':
             # print(f"{doc_token_ids.size()} {len(sent_token_ids)}")
             # doc_token_ids = meta_data['doc_token_ids'].to(device)
             try:
-                return_data, csv_key, csv_v = src_attribute(step_data, meta_data, doc_token_ids, sent_token_ids, doc_in_sentences, uid, model_pkg, device)
+                return_data, csv_key, csv_v = src_attribute(
+                    step_data, meta_data, doc_token_ids, sent_token_ids, doc_in_sentences, uid, model_pkg, device, temperature=args.temp)
                 all_outs += csv_v
                 write_pkl_to_disk(args.dir_base, fname_prefix=uid,
-                              data_obj=return_data)
+                                  data_obj=return_data)
                 df = pd.DataFrame(csv_v, columns=csv_key)
                 df.to_csv(os.path.join(args.dir_stat, uid+'.csv'))
             except IndexError:
                 print("skiiping")
-            
+
     except KeyboardInterrupt:
         logger.info('Done Collecting data ...')
 

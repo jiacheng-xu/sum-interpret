@@ -34,7 +34,7 @@ def tokenize_text(tokenizer, raw_string, max_len=500):
     return token_ids, doc_str, doc_str_lower
 
 
-def gen_original_summary(model, tokenizer, document, device, num_beams=1, max_length=30) -> List[str]:
+def gen_original_summary(model, tokenizer, document, device, num_beams=10, max_length=50) -> List[str]:
     token_ids, doc_str, doc_str_lower = tokenize_text(
         tokenizer=tokenizer, raw_string=document)
     summary_ids = model.generate(token_ids['input_ids'].to(
@@ -126,19 +126,18 @@ def get_cross_attention(cross_attn, input_ids, device, layer=-1):
 
 @torch.no_grad()
 def run_full_model_slim(model, input_ids, attention_mask=None, decoder_input_ids=None, targets=None, device='cuda:0', output_dec_hid=False, output_attentions=False, T=1):
+
     decoder_input_ids = decoder_input_ids.to(device)
     input_ids = input_ids.to(device)
     if attention_mask is not None:
         attention_mask = attention_mask.to(device)
     assert decoder_input_ids.size()[0] == input_ids.size()[0]
+
     model_inputs = {"input_ids": input_ids,
                     "attention_mask": attention_mask,
                     "decoder_input_ids": decoder_input_ids,
                     }
-    # print(input_ids.size())
-    # print(torch.max(input_ids))
-    # print(decoder_input_ids.device)
-    # exit()
+
     outputs = model(**model_inputs,
                     output_hidden_states=output_dec_hid, output_attentions=output_attentions,
                     use_cache=False, return_dict=True)
@@ -231,8 +230,12 @@ def init_bart_family(name_lm, name_sum, device, no_lm=False, no_ood=False):
         lm_model = None
     sum_model, tok = init_bart_sum_model(name_sum, device)
     if not no_ood:
-        sum_out_of_domain, _ = init_bart_sum_model(
-            "facebook/bart-large-cnn", device)
+        if name_sum == "facebook/bart-large-cnn": 
+            sum_out_of_domain, _ = init_bart_sum_model(
+            "facebook/bart-large-xsum", device)
+        else:
+            sum_out_of_domain, _ = init_bart_sum_model(
+            "facebook/bart-large-cnn", device) 
     else:
         sum_out_of_domain = None
     return lm_model, sum_model, sum_out_of_domain, tok

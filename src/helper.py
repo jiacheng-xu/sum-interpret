@@ -8,10 +8,15 @@ def get_sum_data(dataset_name='xsum', split='validation'):
     """
     Load dataset with huggingface datasets
     """
-    from datasets import load_dataset
-    dataset = load_dataset(dataset_name, split=split)
-    logger.info(dataset.features)
-    # logger.debug(f"First Example in {dataset_name} {split}: {dataset[0]}")
+    if dataset_name == 'xsum':
+        from datasets import load_dataset
+        dataset = load_dataset(dataset_name, split=split)
+        logger.info(dataset.features)
+        # logger.debug(f"First Example in {dataset_name} {split}: {dataset[0]}")
+    elif dataset_name == 'cnndm':
+        with open('/mnt/data0/jcxu/dataset_cnndm/validation.pkl', 'rb') as fd:
+
+            dataset = pickle.load(fd)
     return dataset
 
 

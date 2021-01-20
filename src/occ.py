@@ -1,3 +1,4 @@
+from torch.utils.data.dataloader import default_collate
 from helper_run_bart import run_full_model_slim
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.dataset import Dataset
@@ -94,6 +95,15 @@ class MyDataset(Dataset):
         return len(self.data)
 
 
+def my_collate(batch, max_len=500):
+    batch = [(b[0][:max_len], b[1][:max_len]) for b in batch]
+    inps = [b[0] for b in batch]
+    attns = [b[1] for b in batch]
+    inps = torch.LongTensor(inps)
+    attns = torch.LongTensor(attns)
+    return (inps, attns)
+
+
 def step_occlusion(input_tok_ids, actual_word_id, prefix_token_ids, batch_size, model_pkg, device):
 
     combination_input_tok_ids, combination_attn_mask = iterate_occlusions(
@@ -101,19 +111,20 @@ def step_occlusion(input_tok_ids, actual_word_id, prefix_token_ids, batch_size, 
 
     total_len = len(combination_input_tok_ids)
 
-    combination_input_tok_ids = torch.LongTensor(
-        combination_input_tok_ids).to(device)
-    combination_attn_mask = torch.LongTensor(combination_attn_mask).to(device)
+    # combination_input_tok_ids = torch.LongTensor(combination_input_tok_ids)
+    # combination_attn_mask = torch.LongTensor(combination_attn_mask)
 
     dataset = MyDataset(combination_input_tok_ids, combination_attn_mask)
 
-    data_loader = DataLoader(dataset, batch_size=batch_size)
+    data_loader = DataLoader(
+        dataset, batch_size=batch_size, collate_fn=my_collate)
     rec_probs = []
     for batch_idx, inp_data in enumerate(data_loader):
         input_ids, inp_attn = inp_data
+        input_ids = input_ids.to(device)
+        inp_attn = inp_attn.to(device)
         current_batch_size = input_ids.size()[0]
-        decoder_input_ids = prefix_token_ids.to(
-            device).repeat((current_batch_size, 1))
+        decoder_input_ids = prefix_token_ids.to(device).repeat((current_batch_size, 1))
         gather_tgt = torch.LongTensor(
             [actual_word_id]*current_batch_size)
         output_tok, prob, _, loss = run_full_model_slim(

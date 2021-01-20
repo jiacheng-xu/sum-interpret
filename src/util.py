@@ -25,7 +25,7 @@ now = datetime.now()
 logger = logging.getLogger('sum')
 logger.setLevel(logging.DEBUG)
 # create file handler which logs even debug messages
-fh = logging.FileHandler(f"{now.strftime('%m')}{now.strftime('%d')}.html")
+fh = logging.FileHandler(f"{now.strftime('%m')}{now.strftime('%d')}.log")
 fh.setLevel(logging.DEBUG)
 # create console handler with a higher log level
 ch = logging.StreamHandler()
@@ -46,16 +46,21 @@ def load_pickle(dir, fname) -> Dict:
 
 
 def pnum(num):
-    return "{:.2f}".format(num)
+    return "{:.4f}".format(num)
 
 
 def add_dataname_to_suffix(args, args_dir) -> str:
     out = f"{args_dir}_{args.data_name}"
-
+    out = add_temp_to_suffix(args, out)
     if not os.path.exists(out):
         os.makedirs(out)
     return out
 
+def add_temp_to_suffix(args, args_dir) -> str:
+    out = f"{args_dir}_{args.temp}"
+    # if not os.path.exists(out):
+        # os.makedirs(out)
+    return out
 
 def dec_print_wrap(func):
     def wrapper(*args, **kwargs):
@@ -103,6 +108,7 @@ def common_args():
         '-dir_meta', default="/mnt/data0/jcxu/meta_pred", help="The location to meta data.")
     parser.add_argument('-dir_base', default="/mnt/data0/jcxu/output_base")
     parser.add_argument('-dir_stat', default="/mnt/data0/jcxu/csv")
+
     parser.add_argument("--debug", type=str2bool, nargs='?',
                         const=True, default=False,
                         help="Activate debug mode.")
@@ -111,12 +117,14 @@ def common_args():
     parser.add_argument('-max_example', default=5000,
                         help='The max number of examples (documents) to look at.')
     parser.add_argument('-num_run_cut', default=40)
-    parser.add_argument('-batch_size', default=100,type=int)
+    parser.add_argument('-batch_size', default=400,type=int)
     parser.add_argument('-eval_mode', dest='eval_mode', choices=eval_mode)
+    parser.add_argument('-temp',type=float,default=0.5)
     return parser
 
 
 def fix_args(args):
+
     args.dir_base = add_dataname_to_suffix(args, args.dir_base)
     args.dir_meta = add_dataname_to_suffix(args, args.dir_meta)
     args.dir_stat = add_dataname_to_suffix(args, args.dir_stat)
@@ -126,6 +134,8 @@ def fix_args(args):
     if hasattr(args, 'task'):
         args.dir_task = f"/mnt/data0/jcxu/task_{args.task}"
         args.dir_task = add_dataname_to_suffix(args, args.dir_task)
+        args.dir_eval_save = f"/mnt/data0/jcxu/eval_{args.task}_{args.eval_mode}"
+        args.dir_eval_save = add_dataname_to_suffix(args,args.dir_eval_save)
     return args
 
 
