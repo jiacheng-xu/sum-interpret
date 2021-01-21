@@ -7,7 +7,10 @@
     {
       "name": "Python: Current File",
       "type": "python",
-      "args": ["-task=occ", "-eval_mode=sel_tok", "-device=cuda:1","-data_name=cnndm"],
+      "args": ["-task=occ", "-eval_mode=rm_tok", "-device=cuda:0","-debug",
+        // "-sent_pre_sel",
+        // "-data_name=cnndm"
+      ],
       "request": "launch",
       "program": "${file}",
       "console": "integratedTerminal"

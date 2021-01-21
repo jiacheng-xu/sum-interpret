@@ -14,3 +14,5 @@ python evaluation.py -task=lead -eval_mode=sel_sent -device=cuda:1
 python evaluation.py -task=lead -eval_mode=rm_sent -device=cuda:1 
 python evaluation.py -task=random -eval_mode=rm_sent -device=cuda:1 
 python evaluation.py -task=inp_grad -eval_mode=rm_sent -device=cuda:1
+
+python evaluation.py -task=occ -eval_mode=rm_sent -device=cuda:0

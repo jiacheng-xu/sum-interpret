@@ -10,6 +10,7 @@ from int_grad import forward_enc_dec_step, bart_decoder_forward_embed, summarize
 
 
 def step_input_grad(input_ids, actual_word_id, prefix_token_ids, model_pkg, device):
+    start_time = time.time()
     input_ids = torch.LongTensor(input_ids).to(device).unsqueeze(0)
     # input_ids = input_ids[:, :400]
     batch_size, seq_len = input_ids.size()
@@ -50,6 +51,7 @@ def step_input_grad(input_ids, actual_word_id, prefix_token_ids, model_pkg, devi
         # result_inp_grad = torch.mean(result_inp_grad, dim=-1)
 
     ig_enc_result = summarize_attributions(result_inp_grad)
+    duration = time.time() - start_time
     # ig_dec_result = summarize_attributions(ig_dec_result)
     if random.random() < 0.01:
         extracted_attribution = ig_enc_result.squeeze(0)
@@ -61,7 +63,7 @@ def step_input_grad(input_ids, actual_word_id, prefix_token_ids, model_pkg, devi
         # viz = simple_viz_attribution(
         #     tokenizer, decoder_input_ids[0], extracted_attribution)
         # logger.info(viz)
-    return ig_enc_result
+    return ig_enc_result, duration
 
 
 if __name__ == "__main__":
@@ -82,15 +84,35 @@ if __name__ == "__main__":
         outputs = []
         step_data, meta_data = read_meta_data(args.dir_meta, f)
         uid = meta_data['id']
-        for step in step_data:
-            inp_grad_result = step_input_grad(meta_data['doc_token_ids'], actual_word_id=step['tgt_token_id'], prefix_token_ids=step['prefix_token_ids'], model_pkg=model_pkg, device=device)
+        sent_token_ids = meta_data['sent_token_ids']
+        output_base_data = load_pickle(args.dir_base, f)
+        acc_duration = 0
+        for t, step in enumerate(step_data):
+            output_base_step = output_base_data[t]
+            if args.sent_pre_sel:
+                input_doc = prepare_filtered_input_document(
+                    output_base_step, sent_token_ids)
+            else:
+                input_doc = meta_data['doc_token_ids']
+        
+            inp_grad_result ,duration= step_input_grad(input_doc, actual_word_id=step['tgt_token_id'], prefix_token_ids=step['prefix_token_ids'], model_pkg=model_pkg, device=device)
+            acc_duration += duration
             result = inp_grad_result.squeeze(0).cpu().detach()
-            outputs.append(result)
+            if args.sent_pre_sel:
+                rt_step = {
+                    'doc_token_ids': input_doc,
+                    'output': result
+                }
+                outputs.append(rt_step)
+            else:
+                outputs.append(result)
+
         skinny_meta = {
             'doc_token_ids': meta_data['doc_token_ids'],
             'map_index':meta_data['map_index'],
             'sent_token_ids':meta_data['sent_token_ids'],
-            'output': outputs
+            'output': outputs,
+            'time': acc_duration
         }
         write_pkl_to_disk(args.dir_task, uid, skinny_meta)
         print(f"Done {uid}.pkl")

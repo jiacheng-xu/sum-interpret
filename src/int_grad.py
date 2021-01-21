@@ -7,6 +7,7 @@ import torch
 from captum.attr._utils.visualization import format_word_importances
 from helper import *
 
+
 def simple_viz_attribution(tokenizer, input_ids, attribution_scores):
     token_in_list = input_ids.tolist()
     if isinstance(token_in_list[0], list):
@@ -150,7 +151,6 @@ def gen_ref_input(batch_size, seq_len, bos_token_id, pad_token_id, eos_token_id,
 
 def new_step_int_grad(input_ids, actual_word_id, prefix_token_ids, num_run_cut, model_pkg, device):
 
-
     input_ids = torch.LongTensor(input_ids).to(device).unsqueeze(0)
     # input_ids = input_ids[:,:400]
     batch_size, seq_len = input_ids.size()
@@ -158,6 +158,7 @@ def new_step_int_grad(input_ids, actual_word_id, prefix_token_ids, num_run_cut, 
     # encode enc input
     enc_reference = gen_ref_input(num_run_cut, seq_len, tokenizer.bos_token_id,
                                   tokenizer.pad_token_id, tokenizer.eos_token_id, device)
+    start_time = time.time()
     model_encoder = model_pkg['sum'].model.encoder
     encoder_outputs = model_encoder(
         input_ids.to(device), return_dict=True)
@@ -189,6 +190,7 @@ def new_step_int_grad(input_ids, actual_word_id, prefix_token_ids, num_run_cut, 
     #     dec_inp_embedding=dec_inp_embedding, encoder_outputs=encoder_outputs,
     #     dec_ref_embedding=dec_ref_embedding, tgt_class=actual_word_id, device=device, num_steps=num_run_cut)
     ig_enc_result = summarize_attributions(ig_enc_result)
+    duration = time.time() - start_time
     # ig_dec_result = summarize_attributions(ig_dec_result)
     if random.random() < 0.1:
         extracted_attribution = ig_enc_result.squeeze(0)
@@ -200,73 +202,7 @@ def new_step_int_grad(input_ids, actual_word_id, prefix_token_ids, num_run_cut, 
         # viz = simple_viz_attribution(
         #     tokenizer, decoder_input_ids[0], extracted_attribution)
         # logger.info(viz)
-    return ig_enc_result
-
-
-def step_int_grad(interest: str, actual_word_id: int, summary_prefix: List[str], input_doc, num_run_cut: int, model_pkg, device):
-    # assume the batch size is one because we are going to use batch_size as the num trials for ig
-    # input_doc = tokenizer(document, return_tensors='pt', truncation=True, padding=True)
-    # input_doc = input_doc.to(device)
-
-    batch_size, seq_len = input_doc['input_ids'].size()
-    assert batch_size == 1
-
-    # encode enc input
-
-    enc_reference = gen_ref_input(num_run_cut, seq_len, tokenizer.bos_token_id,
-                                  tokenizer.pad_token_id, tokenizer.eos_token_id, device)
-    model_encoder = model_pkg['sum'].model.encoder
-    encoder_outputs = model_encoder(
-        input_doc['input_ids'].to(device), return_dict=True)
-
-    ref_encoder_outputs = model_encoder(
-        enc_reference, return_dict=True)
-    assert isinstance(ref_encoder_outputs, BaseModelOutput)
-
-    # encode dec input
-    decoder_input_ids = torch.LongTensor(tokenizer.encode(
-        summary_prefix[0], return_tensors='pt')).to(device)
-    rt_dec_input_ids = decoder_input_ids.clone().to('cpu')
-    decoder_input_ids = decoder_input_ids.expand(
-        (num_run_cut, decoder_input_ids.size()[-1]))
-    # ATTN: remove the EOS token from the prefix!
-
-    decoder_input_ids = decoder_input_ids[:, :-1]
-    dec_seq_len = decoder_input_ids.size()[-1]
-    model_decoder = model_pkg['sum'].model.decoder
-    dec_reference = gen_ref_input(num_run_cut, dec_seq_len, tokenizer.bos_token_id,
-                                  tokenizer.pad_token_id, tokenizer.eos_token_id, device)
-
-    embed_scale = model_decoder.embed_scale
-    embed_tokens = model_decoder.embed_tokens
-    # dec input embedding
-    dec_inp_embedding = bart_decoder_forward_embed(
-        decoder_input_ids, embed_tokens, embed_scale)
-    # dec ref embedding
-    dec_ref_embedding = bart_decoder_forward_embed(
-        dec_reference, embed_tokens, embed_scale)
-
-    ig_enc_result = ig_enc(model_pkg['sum'],
-                           dec_inp_embedding=dec_inp_embedding, encoder_outputs=encoder_outputs,
-                           ref_encoder_outputs=ref_encoder_outputs, tgt_class=actual_word_id, device=device, num_steps=num_run_cut)
-    ig_dec_result = ig_dec(
-        model_pkg['sum'],
-        dec_inp_embedding=dec_inp_embedding, encoder_outputs=encoder_outputs,
-        dec_ref_embedding=dec_ref_embedding, tgt_class=actual_word_id, device=device, num_steps=num_run_cut)
-    ig_enc_result = summarize_attributions(ig_enc_result)
-    ig_dec_result = summarize_attributions(ig_dec_result)
-    if random.random() < 1:
-        extracted_attribution = ig_enc_result.squeeze(0)
-        input_doc = input_ids.squeeze(0)
-        viz = simple_viz_attribution(
-            tokenizer, input_doc, extracted_attribution)
-        logger.info(viz)
-
-        extracted_attribution = ig_dec_result
-        viz = simple_viz_attribution(
-            tokenizer, decoder_input_ids[0], extracted_attribution)
-        logger.info(viz)
-    return ig_enc_result, ig_dec_result, rt_dec_input_ids
+    return ig_enc_result, duration
 
 
 if __name__ == "__main__":
@@ -278,51 +214,52 @@ if __name__ == "__main__":
     logger.info(args)
 
     device = args.device
-
+    acc_duration = 0
     model_lm, model_sum, model_sum_ood, tokenizer = init_bart_family(
         args.mname_lm, args.mname_sum, device, no_lm=True, no_ood=True)
     logger.info("Done loading BARTs.")
     model_pkg = {'sum': model_sum, 'tok': tokenizer}
     all_files = os.listdir(args.dir_base)
+    
     for f in all_files:
         outputs = []
         exist = check_exist_file(args.dir_task, f)
         if exist:
             logger.debug(f"{f} already exists")
             continue
+        output_base_data = load_pickle(args.dir_base, f)
         step_data, meta_data = read_meta_data(args.dir_meta, f)
+        sent_token_ids = meta_data['sent_token_ids']
         uid = meta_data['id']
         print(f"Input size: {len(meta_data['doc_token_ids'])}")
+        acc_durations = 0
+        for t, step in enumerate(step_data):
+            output_base_step = output_base_data[t]
+            if args.sent_pre_sel:
+                input_doc = prepare_filtered_input_document(
+                    output_base_step, sent_token_ids)
+            else:
+                input_doc = meta_data['doc_token_ids'][:500]
 
-        # cut the input doc size to 500
-        original_input_doc = meta_data['doc_token_ids']
-        new_input_doc = original_input_doc[:500]
-        for step in step_data:
-            ig_enc_result = new_step_int_grad(new_input_doc, actual_word_id=step['tgt_token_id'], prefix_token_ids=step['prefix_token_ids'],
-                                              num_run_cut=args.num_run_cut, model_pkg=model_pkg, device=device)
-            ig_enc_result = ig_enc_result.squeeze(0).cpu().detach()
-            outputs.append(ig_enc_result)
+            ig_enc_result, duration = new_step_int_grad(input_doc, actual_word_id=step['tgt_token_id'], prefix_token_ids=step['prefix_token_ids'],
+                                                        num_run_cut=args.num_run_cut, model_pkg=model_pkg, device=device)
+            acc_duration += duration
+            result = ig_enc_result.squeeze(0).cpu().detach()
+            if args.sent_pre_sel:
+                rt_step = {
+                    'doc_token_ids': input_doc,
+                    'output': result
+                }
+                outputs.append(rt_step)
+            else:
+                outputs.append(result)
+            # outputs.append(ig_enc_result)
         skinny_meta = {
-            'doc_token_ids': new_input_doc,
-            'map_index':meta_data['map_index'],
-            'sent_token_ids':meta_data['sent_token_ids'],
-            'output': outputs
+            'doc_token_ids': input_doc,
+            'map_index': meta_data['map_index'],
+            'sent_token_ids': meta_data['sent_token_ids'],
+            'output': outputs,
+            'time': acc_durations,
         }
         write_pkl_to_disk(args.dir_task, uid, skinny_meta)
         print(f"Done {uid}.pkl")
-
-    """
-    interest = "Google"
-    summary_prefix = "She didn't know her kidnapper but he was using"
-    document = 'Google Maps is a web mapping service developed by Google. It offers satellite imagery, aerial photography, street maps, 360 interactive panoramic views of streets, real-time traffic conditions, and route planning for traveling by foot, car, bicycle, air and public transportation.'
-    document_sents = ['Google Maps is a web mapping service developed by Google. ',
-                      'It offers satellite imagery, aerial photography, street maps, 360 interactive panoramic views of streets, real-time traffic conditions, and route planning for traveling by foot, car, bicycle, air and public transportation.']
-    mname = 'facebook/bart-large-xsum'
-    device = 'cpu'
-    model_sum, bart_tokenizer = init_bart_sum_model(mname, device)
-    model_pkg = {'lm': None, 'sum': model_sum, 'ood': None, 'tok': bart_tokenizer,
-                 'spacy': None}
-    actual_word_id = tokenizer.encode(" "+interest)[1]
-    step_int_grad(interest, actual_word_id, summary_prefix=[summary_prefix], document=[
-        document], document_sents=document_sents, num_run_cut=51, model_pkg=model_pkg, device=device)
-    """

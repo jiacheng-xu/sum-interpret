@@ -26,9 +26,9 @@ def prepare_concat_input_seq(sel_budget: int, input_doc: List[int], top_indicies
     return selected_tokens
 
 
-def rm_tok(sel_budget: int, input_doc: List[int], top_indicies: List[int], ctx_window=2, sep_token_id=6, mask_token_id=50264) -> List[int]:
+def rm_tok(sel_budget: int, input_doc: List[int], top_indicies: List[int], ctx_window=2, sep_token_id=6, mask_token_id=1) -> List[int]:
     # .=4  ,=6  space=1437
-    selected_tokens = []
+    selected_tokens = input_doc.copy()
     cursor = 0
     max_doc_len = len(input_doc) - 1  # <eos>
     min_doc_len = 1  # <s>
@@ -38,11 +38,11 @@ def rm_tok(sel_budget: int, input_doc: List[int], top_indicies: List[int], ctx_w
         left, right = max(
             min_doc_len, sel_idx-ctx_window), min(sel_idx + ctx_window, max_doc_len)
         for idx in range(left, right):
-            input_doc[idx] = mask_token_id
+            selected_tokens[idx] = mask_token_id
         sel_budget -= 1
         if cursor >= len(top_indicies):
             break
-    return input_doc
+    return selected_tokens
 
 
 def render_sel_sent(sel_budget: int, list_sent_tokens: List[List[int]], top_indicies: List[int], sep_token_id=50118) -> List[int]:
@@ -143,10 +143,17 @@ def summarize_result(result: List[dict], args):
     print(",".join(keys))
     print(",".join(values))
     out = [task, mode, ",".join(keys), ",".join(values)]
+    result_dict = {
+        'task':task,
+        'mode':mode,
+        
+    }
     return ",".join(out)
 
 
 def agg_time_step_task_output(seq_of_pred: List[torch.Tensor], device):
+    if isinstance(seq_of_pred[0], List):
+        seq_of_pred = [ torch.tensor(x) for x in seq_of_pred]
     if len(seq_of_pred[0].size()) < 2:
         seq_of_pred = [x.unsqueeze(0) for x in seq_of_pred]
     all_preds = torch.cat(seq_of_pred).to(device)
@@ -178,6 +185,7 @@ def extract_from_baseline(meta_data, step_data, args, budget: List[int], device)
     map_index = meta_data['map_index']
     sent_token_ids = meta_data['sent_token_ids']
     eval_mode = args.eval_mode
+    uid = meta_data['id']
 
     return_data = []
     # for token, get index of token to add or remove
@@ -199,14 +207,14 @@ def extract_from_baseline(meta_data, step_data, args, budget: List[int], device)
                     rendered_tokens = render_sel_sent(
                         sel_budget=bud, list_sent_tokens=sent_token_ids, top_indicies=rank_of_sent_index)
                     unit = assemble_units(
-                        rendered_tokens, step_data, t, bud, eval_mode, meta_data)
+                        rendered_tokens, step_data, t, bud, eval_mode, uid)
                     return_data.append(unit)
             else:
                 for bud in budget:
                     rendered_tokens = render_rm_sent(
                         sel_budget=bud, list_sent_tokens=sent_token_ids, top_indicies=rank_of_sent_index, total_num_sent=total_sents_to_consider)
                     unit = assemble_units(
-                        rendered_tokens, step_data, t, bud, eval_mode, meta_data)
+                        rendered_tokens, step_data, t, bud, eval_mode, uid)
                     return_data.append(unit)
     elif 'tok' in eval_mode:
 
@@ -226,20 +234,20 @@ def extract_from_baseline(meta_data, step_data, args, budget: List[int], device)
                     rendered_tokens = prepare_concat_input_seq(
                         bud, document_tokens, rank_of_tok_index)
                     unit = assemble_units(
-                        rendered_tokens, step_data, t, bud, eval_mode, meta_data)
+                        rendered_tokens, step_data, t, bud, eval_mode, uid)
                     return_data.append(unit)
             else:
                 for bud in budget:
                     rendered_tokens = rm_tok(
                         bud, document_tokens, rank_of_tok_index)
                     unit = assemble_units(
-                        rendered_tokens, step_data, t, bud, eval_mode, meta_data)
+                        rendered_tokens, step_data, t, bud, eval_mode, uid)
                     return_data.append(unit)
 
     return return_data
 
 
-def assemble_units(rendered_tokens, step_data, t, bud, eval_mode, meta_data):
+def assemble_units(rendered_tokens, step_data, t, bud, eval_mode, uid):
     d = {
         "inp": rendered_tokens,
         "prefix": step_data[t]['prefix_token_ids'],
@@ -250,14 +258,11 @@ def assemble_units(rendered_tokens, step_data, t, bud, eval_mode, meta_data):
             'pos': step_data[t]['pos'],
             'bud': bud,
             'mode': eval_mode,
-            'id': meta_data['id']
+            'id': uid
         }
     }
     return d
 
-
-def argsort(seq):
-    return sorted(range(len(seq)), key=seq.__getitem__)
 
 
 def extract_from_task_output(task_output, meta_data, step_data, args, budget: List[int], device):
@@ -270,10 +275,14 @@ def extract_from_task_output(task_output, meta_data, step_data, args, budget: Li
     sent_token_ids = task_output['sent_token_ids']
     pred_output = task_output['output']
     eval_mode = args.eval_mode
-    agg_pred_output = agg_time_step_task_output(pred_output, device)
+    uid = meta_data['id']
     return_data = []
     # for token, get index of token to add or remove
     if 'sent' in eval_mode:
+        if args.sent_pre_sel:
+            raise NotImplementedError("Do not expect sent_pre_sel working with sentence level evaluation.")
+        
+        agg_pred_output = agg_time_step_task_output(pred_output, device)
         # aggeragate units in sent
         agg_pred_output = agg_pred_output.cpu().tolist()
         for t, step_pred in enumerate(agg_pred_output):
@@ -288,36 +297,35 @@ def extract_from_task_output(task_output, meta_data, step_data, args, budget: Li
                 for bud in budget:
                     rendered_tokens = render_sel_sent(
                         sel_budget=bud, list_sent_tokens=sent_token_ids, top_indicies=rank_of_sent_index)
-                    unit = assemble_units(
-                        rendered_tokens, step_data, t, bud, eval_mode, meta_data)
+                    unit = assemble_units(rendered_tokens, step_data, t, bud, eval_mode, uid)
                     return_data.append(unit)
             else:
                 for bud in budget:
-                    rendered_tokens = render_rm_sent(
-                        sel_budget=bud, list_sent_tokens=sent_token_ids, top_indicies=rank_of_sent_index, total_num_sent=total_sents_to_consider)
-                    unit = assemble_units(
-                        rendered_tokens, step_data, t, bud, eval_mode, meta_data)
+                    rendered_tokens = render_rm_sent(sel_budget=bud, list_sent_tokens=sent_token_ids, top_indicies=rank_of_sent_index, total_num_sent=total_sents_to_consider)
+                    unit = assemble_units(rendered_tokens, step_data, t, bud, eval_mode, uid)
                     return_data.append(unit)
     elif 'tok' in eval_mode:
-        agg_pred_output = agg_pred_output.cpu().tolist()
+        if args.sent_pre_sel:
+            agg_pred_output = [ t_pred['output'] for t_pred in pred_output]
+        else:
+            agg_pred_output = agg_time_step_task_output(pred_output, device)
+            agg_pred_output = agg_pred_output.cpu().tolist()
         for t, step_pred in enumerate(agg_pred_output):
-
             rank_of_tok_index = argsort(step_pred)[::-1]
+            if args.sent_pre_sel:
+                document_tokens = pred_output[t]['doc_token_ids']
+            else:
+                pass
             # print(step_pred[rank_of_tok_index[0]])
             # print(step_pred[rank_of_tok_index[-1]])
             if 'sel' in eval_mode:
                 for bud in budget:
-                    rendered_tokens = prepare_concat_input_seq(
-                        bud, document_tokens, rank_of_tok_index)
-                    unit = assemble_units(
-                        rendered_tokens, step_data, t, bud, eval_mode, meta_data)
+                    rendered_tokens = prepare_concat_input_seq(bud, document_tokens, rank_of_tok_index)
+                    unit = assemble_units(rendered_tokens, step_data, t, bud, eval_mode, uid)
                     return_data.append(unit)
             else:
                 for bud in budget:
-                    rendered_tokens = rm_tok(
-                        bud, document_tokens, rank_of_tok_index)
-                    unit = assemble_units(
-                        rendered_tokens, step_data, t, bud, eval_mode, meta_data)
+                    rendered_tokens = rm_tok(bud, document_tokens, rank_of_tok_index)
+                    unit = assemble_units(rendered_tokens, step_data, t, bud, eval_mode, uid)
                     return_data.append(unit)
     return return_data
-

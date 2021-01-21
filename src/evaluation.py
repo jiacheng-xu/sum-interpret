@@ -73,9 +73,10 @@ if __name__ == "__main__":
     debug = False
     parser = common_args()
     args = parser.parse_args()
+    args = fix_args(args)
     logger.info(args)
     device = args.device
-    args = fix_args(args)
+
     if debug:
         args.device = 'cpu'
         args.mname_sum = 'sshleifer/distilbart-xsum-6-6'
@@ -97,15 +98,20 @@ if __name__ == "__main__":
     else:
         all_files_eval = os.listdir(args.dir_task)
         viable_files = list(set(all_files_base) & set(all_files_eval))
-    viable_files = viable_files[:50]
+    viable_files = viable_files[:100]
+    print(len(viable_files))
     all_result = []
     try:
         for f in viable_files:
             try:
                 uid = f.split('.')[0]
+                exist = check_exist_file(args.dir_eval_save, f)
+                if exist:
+                    logger.debug(f"{f} already exists")
+                    continue
                 output_base_data = load_pickle(args.dir_base, f)
                 step_data, meta_data = read_meta_data(args.dir_meta, f)
-                if args.task in ['int_grad', 'inp_grad']:
+                if args.task in ['int_grad', 'inp_grad', 'occ', 'int_grad_sent_sel', 'inp_grad_sent_sel', 'occ_sent_sel']:
                     task_output = load_pickle(args.dir_task, f)
                     pack_data_inp = extract_from_task_output(
                         task_output, meta_data, step_data, args, budget_ig, device)
@@ -117,10 +123,12 @@ if __name__ == "__main__":
                     print("working ...")
                 this_result = run_eval(model_pkg['sum'], data_gen)
             except RuntimeError:
-                logger.warn(f"Runtime error captured in {uid}")
+                logger.warning(f"Runtime error captured in {uid}")
+                continue
             # write evaluation output to disk to reuse
             write_pkl_to_disk(args.dir_eval_save, uid, this_result)
             all_result += this_result
+            
     except KeyboardInterrupt:
         logger.info(f"Done {len(all_result)}")
     one_line_out = summarize_result(all_result, args)

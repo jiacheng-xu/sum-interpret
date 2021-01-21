@@ -119,12 +119,14 @@ def step_occlusion(input_tok_ids, actual_word_id, prefix_token_ids, batch_size, 
     data_loader = DataLoader(
         dataset, batch_size=batch_size, collate_fn=my_collate)
     rec_probs = []
+    start_time = time.time()
     for batch_idx, inp_data in enumerate(data_loader):
         input_ids, inp_attn = inp_data
         input_ids = input_ids.to(device)
         inp_attn = inp_attn.to(device)
         current_batch_size = input_ids.size()[0]
-        decoder_input_ids = prefix_token_ids.to(device).repeat((current_batch_size, 1))
+        decoder_input_ids = prefix_token_ids.to(
+            device).repeat((current_batch_size, 1))
         gather_tgt = torch.LongTensor(
             [actual_word_id]*current_batch_size)
         output_tok, prob, _, loss = run_full_model_slim(
@@ -136,8 +138,9 @@ def step_occlusion(input_tok_ids, actual_word_id, prefix_token_ids, batch_size, 
             device=device)
         sel_prob = prob[:, actual_word_id].tolist()
         rec_probs += sel_prob
+    duration = time.time() - start_time
     assert len(rec_probs) == total_len
-    return rec_probs
+    return rec_probs, duration
 
 
 if __name__ == "__main__":
@@ -157,22 +160,42 @@ if __name__ == "__main__":
     for f in all_files:
         outputs = []
         step_data, meta_data = read_meta_data(args.dir_meta, f)
+
+        output_base_data = load_pickle(args.dir_base, f)
         exist = check_exist_file(args.dir_task, f)
         if exist:
             logger.debug(f"{f} already exists")
             continue
         uid = meta_data['id']
-        for step in step_data:
-
-            result = step_occlusion(input_tok_ids=meta_data['doc_token_ids'], actual_word_id=step['tgt_token_id'],
-                                    prefix_token_ids=step['prefix_token_ids'], batch_size=args.batch_size, model_pkg=model_pkg, device=device)
+        sent_token_ids = meta_data['sent_token_ids']
+        acc_duration = 0
+        # tokenizer.encode(x) for x in
+        for t, step in enumerate(step_data):
+            output_base_step = output_base_data[t]
+            if args.sent_pre_sel:
+                input_doc = prepare_filtered_input_document(
+                    output_base_step, sent_token_ids)
+            else:
+                input_doc = meta_data['doc_token_ids']
+            result, duration = step_occlusion(input_tok_ids=input_doc, actual_word_id=step['tgt_token_id'],
+                                              prefix_token_ids=step['prefix_token_ids'], batch_size=args.batch_size, model_pkg=model_pkg, device=device)
+            acc_duration += duration
             print(f"Mean:{statistics.mean(result) } Max: {max(result) }")
-            outputs.append(result)
+            if args.sent_pre_sel:
+                rt_step = {
+                    'doc_token_ids': input_doc,
+
+                    'output': result
+                }
+                outputs.append(rt_step)
+            else:
+                outputs.append(result)
         skinny_meta = {
             'doc_token_ids': meta_data['doc_token_ids'],
             'map_index': meta_data['map_index'],
             'sent_token_ids': meta_data['sent_token_ids'],
-            'output': outputs
+            'output': outputs,
+            'time': acc_duration
         }
         write_pkl_to_disk(args.dir_task, uid, skinny_meta)
         print(f"Done {uid}.pkl")
