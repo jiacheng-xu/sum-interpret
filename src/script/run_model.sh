@@ -14,3 +14,6 @@ python evaluation.py -task=random -eval_mode=sel_sent
 
 python evaluation.py -task=int_grad -eval_mode=sel_sent
 python post_eval.py
+
+
+python attn.py -task='attn'  -device='cuda:1'  -sent_pre_sel 

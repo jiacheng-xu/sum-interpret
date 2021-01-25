@@ -129,6 +129,7 @@ def common_args():
     parser.add_argument('-eval_mode', dest='eval_mode', choices=eval_mode)
     parser.add_argument('-temp', type=float, default=0.5)
     parser.add_argument('-eval_set',dest='eval_set',choices=settings)
+    parser.add_argument('-hard_max_len',default=500,type=int)
     return parser
 import time
 from operator import itemgetter

@@ -12,7 +12,10 @@ def prepare_concat_input_seq(sel_budget: int, input_doc: List[int], top_indicies
     min_doc_len = 1  # <s>
     while sel_budget > 0:
         sel_idx = top_indicies[cursor]
+
         cursor += 1
+        if sel_idx > max_doc_len:
+            continue
         left, right = max(
             min_doc_len, sel_idx-ctx_window), min(sel_idx + ctx_window, max_doc_len)
         if selected_tokens:
@@ -35,6 +38,8 @@ def rm_tok(sel_budget: int, input_doc: List[int], top_indicies: List[int], ctx_w
     while sel_budget > 0:
         sel_idx = top_indicies[cursor]
         cursor += 1
+        if sel_idx > max_doc_len:
+            continue
         left, right = max(
             min_doc_len, sel_idx-ctx_window), min(sel_idx + ctx_window, max_doc_len)
         for idx in range(left, right):
@@ -144,16 +149,16 @@ def summarize_result(result: List[dict], args):
     print(",".join(values))
     out = [task, mode, ",".join(keys), ",".join(values)]
     result_dict = {
-        'task':task,
-        'mode':mode,
-        
+        'task': task,
+        'mode': mode,
+
     }
     return ",".join(out)
 
 
 def agg_time_step_task_output(seq_of_pred: List[torch.Tensor], device):
     if isinstance(seq_of_pred[0], List):
-        seq_of_pred = [ torch.tensor(x) for x in seq_of_pred]
+        seq_of_pred = [torch.tensor(x) for x in seq_of_pred]
     if len(seq_of_pred[0].size()) < 2:
         seq_of_pred = [x.unsqueeze(0) for x in seq_of_pred]
     all_preds = torch.cat(seq_of_pred).to(device)
@@ -181,7 +186,7 @@ def comp_sent_avg_activation(pred: List[float], map_index):
 
 
 def extract_from_baseline(meta_data, step_data, args, budget: List[int], device):
-    document_tokens = meta_data['doc_token_ids']
+    document_tokens = meta_data['doc_token_ids'][:args.hard_max_len]
     map_index = meta_data['map_index']
     sent_token_ids = meta_data['sent_token_ids']
     eval_mode = args.eval_mode
@@ -217,7 +222,6 @@ def extract_from_baseline(meta_data, step_data, args, budget: List[int], device)
                         rendered_tokens, step_data, t, bud, eval_mode, uid)
                     return_data.append(unit)
     elif 'tok' in eval_mode:
-
         for t, step in enumerate(step_data):
             # first element is the index of the top 1 sent
             total_num_tok = len(document_tokens)
@@ -264,15 +268,36 @@ def assemble_units(rendered_tokens, step_data, t, bud, eval_mode, uid):
     return d
 
 
+def process_occlusion(task_output):
+    output = task_output['output']
+    if isinstance(output[0],list):
+        output = [ [1- x for x in one] for one in output]
+        task_output['output'] = output
+        return task_output
+    for idx, out in enumerate(output) :
+        inner_out = out['output']
+        inner_out = [ 1-x for x in inner_out]
+        output[idx]['output'] = inner_out
+
+    task_output['output'] = output
+    return task_output
+
 
 def extract_from_task_output(task_output, meta_data, step_data, args, budget: List[int], device):
     # 'doc_token_ids': new_input_doc,
     # 'map_index':meta_data['map_index'],
     # 'sent_token_ids':meta_data['sent_token_ids'],
     # 'output': outputs
-    document_tokens = task_output['doc_token_ids']
+    if 'occ' in args.task:
+        task_output = process_occlusion(task_output)
+    document_tokens = task_output['doc_token_ids'][:args.hard_max_len]
     map_index = task_output['map_index']
+    # Truncate sent
     sent_token_ids = task_output['sent_token_ids']
+    doc_tok_len = len(document_tokens)
+    max_sent_idx = map_index[doc_tok_len-1]
+    sent_token_ids = sent_token_ids[:max_sent_idx+1]
+    map_index = map_index[:doc_tok_len]
     pred_output = task_output['output']
     eval_mode = args.eval_mode
     uid = meta_data['id']
@@ -280,8 +305,9 @@ def extract_from_task_output(task_output, meta_data, step_data, args, budget: Li
     # for token, get index of token to add or remove
     if 'sent' in eval_mode:
         if args.sent_pre_sel:
-            raise NotImplementedError("Do not expect sent_pre_sel working with sentence level evaluation.")
-        
+            raise NotImplementedError(
+                "Do not expect sent_pre_sel working with sentence level evaluation.")
+
         agg_pred_output = agg_time_step_task_output(pred_output, device)
         # aggeragate units in sent
         agg_pred_output = agg_pred_output.cpu().tolist()
@@ -297,16 +323,19 @@ def extract_from_task_output(task_output, meta_data, step_data, args, budget: Li
                 for bud in budget:
                     rendered_tokens = render_sel_sent(
                         sel_budget=bud, list_sent_tokens=sent_token_ids, top_indicies=rank_of_sent_index)
-                    unit = assemble_units(rendered_tokens, step_data, t, bud, eval_mode, uid)
+                    unit = assemble_units(
+                        rendered_tokens, step_data, t, bud, eval_mode, uid)
                     return_data.append(unit)
             else:
                 for bud in budget:
-                    rendered_tokens = render_rm_sent(sel_budget=bud, list_sent_tokens=sent_token_ids, top_indicies=rank_of_sent_index, total_num_sent=total_sents_to_consider)
-                    unit = assemble_units(rendered_tokens, step_data, t, bud, eval_mode, uid)
+                    rendered_tokens = render_rm_sent(
+                        sel_budget=bud, list_sent_tokens=sent_token_ids, top_indicies=rank_of_sent_index, total_num_sent=total_sents_to_consider)
+                    unit = assemble_units(
+                        rendered_tokens, step_data, t, bud, eval_mode, uid)
                     return_data.append(unit)
     elif 'tok' in eval_mode:
         if args.sent_pre_sel:
-            agg_pred_output = [ t_pred['output'] for t_pred in pred_output]
+            agg_pred_output = [t_pred['output'] for t_pred in pred_output]
         else:
             agg_pred_output = agg_time_step_task_output(pred_output, device)
             agg_pred_output = agg_pred_output.cpu().tolist()
@@ -320,12 +349,16 @@ def extract_from_task_output(task_output, meta_data, step_data, args, budget: Li
             # print(step_pred[rank_of_tok_index[-1]])
             if 'sel' in eval_mode:
                 for bud in budget:
-                    rendered_tokens = prepare_concat_input_seq(bud, document_tokens, rank_of_tok_index)
-                    unit = assemble_units(rendered_tokens, step_data, t, bud, eval_mode, uid)
+                    rendered_tokens = prepare_concat_input_seq(
+                        bud, document_tokens, rank_of_tok_index)
+                    unit = assemble_units(
+                        rendered_tokens, step_data, t, bud, eval_mode, uid)
                     return_data.append(unit)
             else:
                 for bud in budget:
-                    rendered_tokens = rm_tok(bud, document_tokens, rank_of_tok_index)
-                    unit = assemble_units(rendered_tokens, step_data, t, bud, eval_mode, uid)
+                    rendered_tokens = rm_tok(
+                        bud, document_tokens, rank_of_tok_index)
+                    unit = assemble_units(
+                        rendered_tokens, step_data, t, bud, eval_mode, uid)
                     return_data.append(unit)
     return return_data

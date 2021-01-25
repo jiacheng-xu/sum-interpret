@@ -93,7 +93,7 @@ if __name__ == "__main__":
                 input_doc = prepare_filtered_input_document(
                     output_base_step, sent_token_ids)
             else:
-                input_doc = meta_data['doc_token_ids']
+                input_doc = meta_data['doc_token_ids'][:args.hard_max_len]
         
             inp_grad_result ,duration= step_input_grad(input_doc, actual_word_id=step['tgt_token_id'], prefix_token_ids=step['prefix_token_ids'], model_pkg=model_pkg, device=device)
             acc_duration += duration

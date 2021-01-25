@@ -125,7 +125,7 @@ def get_cross_attention(cross_attn, input_ids, device, layer=-1):
 
 
 @torch.no_grad()
-def run_full_model_slim(model, input_ids, attention_mask=None, decoder_input_ids=None, targets=None, device='cuda:0', output_dec_hid=False, output_attentions=False, T=1):
+def run_full_model_slim(model, input_ids, attention_mask=None, decoder_input_ids=None, targets=None, device='cuda:0', output_dec_hid=False, output_attentions=False, T=1, special_attn=False):
 
     decoder_input_ids = decoder_input_ids.to(device)
     input_ids = input_ids.to(device)
@@ -150,6 +150,15 @@ def run_full_model_slim(model, input_ids, attention_mask=None, decoder_input_ids
             input=next_token_logits, target=targets, reduction='none')
     else:
         loss = 0
+    if special_attn:
+        cross_attn = outputs['cross_attentions']
+        attn = cross_attn[-1][:, :, -1, :]
+        # batch, nhead, enc_len
+        mean_attn = torch.mean(attn, dim=1)
+        # block special positions in input
+        mask = (input_ids >= 5).float()
+        mean_attn = mean_attn * mask
+        return mean_attn[0] 
     if output_attentions:
         # use cross attention as the distribution
         # last layer.   batch=1, head, dec len, enc len
@@ -157,6 +166,8 @@ def run_full_model_slim(model, input_ids, attention_mask=None, decoder_input_ids
         output, p = get_cross_attention(
             outputs['cross_attentions'], input_ids, device=device)
         return output, p
+
+        
     prob = torch.nn.functional.softmax(next_token_logits/T, dim=-1)
     # prob = next_token_logits.softmax(dim=-1)
     next_token = torch.argmax(next_token_logits, dim=-1)

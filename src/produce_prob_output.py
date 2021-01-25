@@ -78,7 +78,7 @@ def prepare_double_pertb(tokenizer, sent_text, device):
         tokenizer, combined_text, device)
     return input_ids, attn, comb
 
-
+import time
 def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, sent_texts: List[str], model_pkg, device, temperature=1):
     # print(f"start:{start_matching_index}\n{summary}")
     # summary_prefix = get_summ_prefix(
@@ -95,6 +95,7 @@ def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, sent_texts: List[
     _, p_full, logit_full, _ = run_full_model_slim(
         model=model_pkg['sum'], input_ids=input_ids, attention_mask=None, decoder_input_ids=prefix_ids, targets=None, device=device, T=temperature)
 
+    start = time.time()
     # perturbation document_sents
     num_perturb_sent = len(sent_texts)
     expand_prefix_ids = prefix_ids.repeat((num_perturb_sent, 1))
@@ -102,7 +103,8 @@ def _step_src_attr(input_ids, prefix_ids, summary_prefix: str, sent_texts: List[
         model_pkg['tok'], sent_text=sent_texts, device=device)
     _, p_sum_pert, _, _ = run_full_model_slim(
         model=model_pkg['sum'], input_ids=pert_input, attention_mask=pert_attn, decoder_input_ids=expand_prefix_ids, targets=None, device=device, T=temperature)
-
+    end = time.time() - start
+    print(end)
     lm_output_topk, p_lm, logit_lm = run_lm(
         model_pkg['lm'], model_pkg['tok'], device=device, sum_prefix=summary_prefix,  T=temperature)
     # lm_output_topk is a list of tokens

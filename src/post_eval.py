@@ -163,6 +163,7 @@ if __name__ == "__main__":
     print(dir_eval_save)
     files_meta = os.listdir(dir_meta)
     files = [f for f in files if f in occ_files]
+    print(len(files))
     cnt = 0
     fusion = 0
     lm = 0
@@ -174,6 +175,7 @@ if __name__ == "__main__":
     dict_bud = {}
     all_dists = {}
     tags = ['fusion', 'novel', 'lm', 'ctx', 'hard', 'all']
+
     for tag in tags:
         all_dists[tag] = {}
     dir_latex = '/mnt/data0/jcxu/latex'
@@ -221,8 +223,8 @@ if __name__ == "__main__":
         keys = list(cur_dict.keys())
         values = list(cur_dict.values())
         values = [statistics.mean(v) for v in values]
-        keys_str = "".join([f"& {k}" for k in keys]) + '\\\\ \n'
-        values_str = "".join([f"& { pnum(v)}" for v in values]) + '\\\\ \n'
+        keys_str = "".join([f"\t {k}" for k in keys]) + '\n'
+        values_str = "".join([f"\t { pnum(v)}" for v in values]) + '\n'
         print(keys_str)
         print(values_str)
         final_str = f"{task} {values_str}"
