@@ -16,3 +16,9 @@ python evaluation.py -task=random -eval_mode=rm_sent -device=cuda:1
 python evaluation.py -task=inp_grad -eval_mode=rm_sent -device=cuda:1
 
 python evaluation.py -task=occ -eval_mode=rm_sent -device=cuda:0
+
+
+python evaluation.py -task=random -eval_mode=sel_sent
+
+python evaluation.py -task=int_grad -eval_mode=sel_sent
+python post_eval.py

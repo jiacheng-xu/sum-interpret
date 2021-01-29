@@ -14,6 +14,8 @@ from util import *
 from helper import *
 colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k', 'w']
 # colors = mcolors.TABLEAU_COLORS
+colors = sns.color_palette("colorblind", 6)
+
 
 keys_matter = ['pos', 'lm_imp', 'lm_full', 'lm2full', 'imp_cnn_full', 'lm2imp', 'imp_cnn_imp', 'imp_cnn2imp', 'imp_full', 'imp2full', 'token', 'prefix',
                'pert_var',  'pert_sents', 'top_lm', 'top_imp', 'top_full', 'top_impood', 'top_attn', 'pert_top', 'fusion', 'novel', 'lm', 'ctx', 'easy', 'pert_delta']
@@ -120,50 +122,40 @@ def process_one_pack(data_pack, keys, xaxis_name):
 def draw_map_figure(x, y, pert_v, pert_max, delta, map_name, xaxis_name, label_name, label_values):
     xlabel = r'$d$(LM, FULL)'
     ylabel = r'$d$(LM-FT, FULL)'
-
+    style = ['o', '+']
     if label_name == 'none':
         labels = []
-        no_ctx_lm = 'no_ctx_lm'
-        no_ctx_td = 'no_ctx_td'
-        no_ctx_other = 'no_ctx_other'
 
-        ctx_single = 'ctx_single'
-        ctx_double = 'ctx_double'
-        ctx_others = 'ctx_other'
-
-        CNT_EZ = "CTX-Ez"
-        CNT_HD = "CTX-Hd"
+        CNT_EZ = "CT-Ez"
+        CNT_HD = "CT-Hd"
         LM = "LM"
+        Other = "Other"
         for a, b, c, d, change in zip(x, y, pert_v, pert_max, delta):
-            # if c < 0.2 and d < 0.3:
-            # l = 'var & max'
-            # elif c > 0.3 and d < 0.3:
-            #     l = 'VAR & max'
-            if c < 0.15 and d > 0.7:
-                if a < 0.5 and b < 0.5:
-                    l = no_ctx_lm
-                elif a > 1.5 and b < 0.5:
-                    l = no_ctx_td
-                else:
-                    l = no_ctx_other
-                labels.append(l)
-                continue
-
-            if c > 0.4 and d > 0.7:
-                l = ctx_single
-            elif change != '' and float(change) > 0.2:
-                l = ctx_double
+            if c < 0.3 and d > 0.6:
+                l = LM
+            elif c < 0.5 and d < 0.3:
+                l = CNT_HD
+            elif c > 0.5 and d > 0.6:
+                l = CNT_EZ
             else:
-                l = ctx_others
+                l = Other
 
             labels.append(l)
         plat = colors[: len(set(labels))]
     else:
         labels = label_values
         plat = colors[:2]
+    stys = []
+    for l in labels:
+        if l != CNT_HD:
+            stys.append(style[0])
+        else:
+            stys.append(style[1])
+    # stys = [style[0] for l in labels if l != CNT_HD else style[1]]
     d = {xlabel: pd.Series(x),
          ylabel: pd.Series(y),
          "label": pd.Series(labels),
+         "style": pd.Series(stys),
          }
 
     df = pd.DataFrame(d)
@@ -186,32 +178,38 @@ def draw_map_figure(x, y, pert_v, pert_max, delta, map_name, xaxis_name, label_n
     #     oa = [a for a, b, c in zip(x, y, labels) if c == en]
     #     ob = [b for a, b, c in zip(x, y, labels) if c == en]
     #     scatter = ax.scatter(oa, ob, s=s, marker='o', label=str(en), alpha=0.5,edgecolors='none')
+    hue_order = [LM, CNT_EZ,CNT_HD,Other]
     g = sns.JointGrid(data=df, x=xlabel, y=ylabel,
-                      hue='label', palette=plat, height=4)
+                      hue='label',  palette=plat, height=4,hue_order=hue_order)
     # g.fig.set_size_inches(3,3)
-
+    lm_color = colors[0]
+    ctx_color = colors[1]
+    c_ctx_easy = ctx_color
+    c_ctx_hd = colors[2]
+    c_other = colors[3]
+    pt_color = colors[4]
+    td_color = colors[5]
     import matplotlib.patches as mpatches
     import matplotlib.lines as mlines
-
+    mk_size = 6
     # ez_patch = mpatches.Patch(color=plat[0], label=CNT_EZ)
-    ez_patch = mlines.Line2D([], [], color=plat[0], marker='o',
-                             linestyle='None', markersize=10, label=CNT_EZ)
+    ez_patch = mlines.Line2D([], [], color=c_ctx_easy, marker='o',
+                             linestyle='None', markersize=mk_size, label=CNT_EZ)
 
     # hd_patch = mpatches.Patch(color=plat[1], label=CNT_HD)
-    hd_patch = mlines.Line2D([], [], color=plat[1], marker='o', linestyle='None',
-                             markersize=10, label=CNT_HD)
+    hd_patch = mlines.Line2D([], [], color=c_ctx_hd, marker='o', linestyle='None',
+                             markersize=mk_size, label=CNT_HD)
     # lm_patch = mpatches.Patch(color=plat[2], label=LM)
-    lm_patch = mlines.Line2D([], [], color=plat[2], marker='o', linestyle='None',
-                             markersize=10, label=LM)
-    """
-    bbox_to_anchor = (-7.5, 1.25)
-    plt.legend(handles=[lm_patch, ez_patch, hd_patch], loc='upper left', ncol=3, bbox_to_anchor=bbox_to_anchor, handletextpad=0.1)
+    lm_patch = mlines.Line2D([], [], color=lm_color, marker='o', linestyle='None',
+                             markersize=mk_size, label=LM)
+    other_path = mlines.Line2D([], [], color=c_other, marker='o', linestyle='None',
+                               markersize=mk_size, label=Other)
     g.plot_joint(sns.scatterplot, s=s, alpha=.5, edgecolors='none',
-                 legend=False
+                  legend=False,
+                 style=stys
                  )
-    """
-    g.plot_joint(sns.scatterplot, s=s, alpha=.5,
-                 edgecolors='none', legend=False)
+    # g.plot_joint(sns.scatterplot, s=s, alpha=.5,
+    #              edgecolors='none', legend=False)
 
     g.plot_marginals(sns.histplot, bins=40, linewidth=0, multiple="stack")
     # g.ax.legend(loc=2)
@@ -225,8 +223,34 @@ def draw_map_figure(x, y, pert_v, pert_max, delta, map_name, xaxis_name, label_n
     # VMa = [a for a,b,c in zip(x,y,labels) if c == CNT_EZ]
     # VMb = [b for a,b,c in zip(x,y,labels) if c == CNT_EZ]
     # scatter = ax.scatter(VMa, VMb, marker='+',s=s, label=CNT_EZ)
-    # ax.fill_between([0,2], [0.5, 0.5],[2,2] , color='C0', alpha=0.1)
-    # ax.fill_between([0,0.5], [0., 0.0],[0.5,0.5] , color='C1', alpha=0.1)
+
+    g.ax_joint.fill_between([0.5, 2], [0.5, 0.5], [
+                            2, 2], color=ctx_color, alpha=0.1, edgecolor='none', lw=0)  # Context
+    g.ax_joint.fill_between([0, 0.5], [0., 0.0], [
+                            0.5, 0.5], color=lm_color, alpha=0.1, edgecolor='none', lw=0)  # LM
+    g.ax_joint.fill_between([0, 0.5], [1.5, 1.5], [
+                            2, 2], color=pt_color, alpha=0.1, edgecolor='none', lw=0)  # PT
+    g.ax_joint.fill_between([1.5, 2], [0., 0.0], [
+                            0.5, 0.5], color=td_color, alpha=0.1, edgecolor='none', lw=0)  # TD
+    g.ax_joint.annotate('CT', xy=(2, 2), xytext=(1.2, 1.2), color=ctx_color,
+                        # arrowprops=dict(facecolor='none', shrink=0.05),
+                        )
+    g.ax_joint.annotate('PT', xy=(2, 2), xytext=(0.2, 1.7), color=pt_color,
+                        # arrowprops=dict(facecolor='black', shrink=0.05),
+                        )
+    g.ax_joint.annotate('TD', xy=(2, 2), xytext=(1.7, 0.2), color=td_color,
+                        # arrowprops=dict(facecolor='black', shrink=0.05),
+                        )
+    g.ax_joint.annotate('LM', xy=(0.25, 0.25), xytext=(0.2, 0.2), color=lm_color,
+                        # arrowprops=dict(facecolor='none', shrink=0.05),
+                        )
+    bbox_to_anchor = (-7.5, 1.25)
+    plt.legend(handles=[lm_patch, ez_patch, hd_patch, other_path], loc='upper left',
+               ncol=4, bbox_to_anchor=bbox_to_anchor, handletextpad=0, columnspacing=0.2)
+    # g.legend(handles=[lm_patch, ez_patch, hd_patch], loc='best', ncol=3,
+    #  bbox_to_anchor=bbox_to_anchor,
+    #  handletextpad=0.1
+    #  )
     # ax.fill_between([0.5,2], [0., 0.0],[0.5,0.5] , color='grey', alpha=0.1)
     # ax.legend()
 
@@ -235,10 +259,10 @@ def draw_map_figure(x, y, pert_v, pert_max, delta, map_name, xaxis_name, label_n
     # ax.set_ylabel(r'$d$(LM-FT, FULL)')
     # sns.scatterplot(x=x, y=y, hue=labels,s=4)
     # sns.jointplot(x=x, y=y, hue=labels, kind="kde")
-    # plt.tight_layout()
+    # plt.tight_layout(rect=[0,0,0.8,1])
     # plt.show()
 
-    plt.savefig(map_name, format='pdf')
+    plt.savefig(map_name, format='pdf', bbox_inches="tight")
 
     # fig.tight_layout()
     # fig.show()
@@ -252,7 +276,7 @@ if __name__ == "__main__":
     args = fix_args(args)
     logger.info(args)
     # fname = '/mnt/data0/jcxu/output_file.csv'
-    fname = '/mnt/data0/jcxu/csv_xsum/meta.csv'
+    # fname = '/mnt/data0/jcxu/csv_xsum/meta.csv'
     # fname = '/mnt/data0/jcxu/output_file_test.csv'
     # fname = '/mnt/data0/jcxu/csv_xsum/viz_t_0.5.csv'
     fname = f"{args.dir_stat}/viz.csv"
@@ -263,7 +287,7 @@ if __name__ == "__main__":
     key = read_out[0]
     data = read_out[1:]
     if debug:
-        data = data[:100]
+        data = data[:300]
     X, Y, Var, Max = [], [], [], []
     delta = []
     cat_k, cat_v = [], []
@@ -289,12 +313,5 @@ if __name__ == "__main__":
     show_quantiles(Var)
     show_quantiles(Max)
     for label in cat:
-        name_of_map = f"map_{label}_{xaxis}.pdf"
-        if label == 'none':
-            draw_map_figure(X, Y, Var, Max, delta,
-                            name_of_map, xaxis, label, None)
-        else:
-            lb_idx = cat_keys.index(label)
-            label_val = [m[lb_idx] for m in cat_v]
-            draw_map_figure(X, Y, Var, Max, name_of_map,
-                            xaxis, label, label_val)
+        name_of_map = f"map_{args.data_name}_{label}_{xaxis}.pdf"
+        draw_map_figure(X, Y, Var, Max, delta, name_of_map, xaxis, label, None)

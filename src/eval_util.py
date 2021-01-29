@@ -4,49 +4,88 @@ from helper import *
 from util import *
 
 
-def prepare_concat_input_seq(sel_budget: int, input_doc: List[int], top_indicies: List[int], ctx_window=2, sep_token_id=6) -> List[int]:
+def merge(intervals):
+    out = []
+    for i in sorted(intervals, key=lambda i: i[0]):
+        if out and i[0] <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], i[1])
+        else:
+            out += i,
+    return out
+
+
+def prepare_concat_input_seq(sel_budget: int, input_doc: List[int], top_indicies: List[int], ctx_window=1, sep_token_id=6) -> List[int]:
     # .=4  ,=6  space=1437
-    selected_tokens = []
+
+    already_locations = []
     cursor = 0
     max_doc_len = len(input_doc) - 1  # <eos>
     min_doc_len = 1  # <s>
-    while sel_budget > 0:
+    queue = []
+    while len(already_locations) < sel_budget:
+        if queue:
+            candidate_loc = queue.pop(0)
+            if candidate_loc in already_locations:
+                continue
+            elif candidate_loc >= min_doc_len and candidate_loc < max_doc_len:
+                already_locations.append(candidate_loc)
+                continue
+        # if the queue is empty
         sel_idx = top_indicies[cursor]
-
         cursor += 1
         if sel_idx > max_doc_len:
             continue
         left, right = max(
-            min_doc_len, sel_idx-ctx_window), min(sel_idx + ctx_window, max_doc_len)
-        if selected_tokens:
-            span_bpe = [sep_token_id]+input_doc[left:right]
-        else:
-            span_bpe = input_doc[left:right]
-        selected_tokens += span_bpe
-        sel_budget -= 1
+            min_doc_len, sel_idx-ctx_window), min(sel_idx + ctx_window+ 1, max_doc_len)
+        queue.append(sel_idx)
+        for idx in range(left, right):
+            queue.append(idx)
         if cursor >= len(top_indicies):
             break
+    selected_tokens = [0]
+    already_locations.sort()
+    for idx, loc in enumerate(already_locations):
+        selected_tokens.append(input_doc[loc])
+        if idx + 1 < len(already_locations):
+            next_tok_idx = already_locations[idx+1]
+            if next_tok_idx - 1 != loc:
+                selected_tokens.append(sep_token_id)
+    selected_tokens.append(2)
+
     return selected_tokens
 
 
-def rm_tok(sel_budget: int, input_doc: List[int], top_indicies: List[int], ctx_window=2, sep_token_id=6, mask_token_id=1) -> List[int]:
+def rm_tok(sel_budget: int, input_doc: List[int], top_indicies: List[int], ctx_window=1, sep_token_id=6, mask_token_id=1) -> List[int]:
     # .=4  ,=6  space=1437
     selected_tokens = input_doc.copy()
+    already_locations = []
+
     cursor = 0
     max_doc_len = len(input_doc) - 1  # <eos>
     min_doc_len = 1  # <s>
-    while sel_budget > 0:
+    queue = []
+    while len(already_locations) < sel_budget:
+        if queue:
+            candidate_loc = queue.pop(0)
+            if candidate_loc in already_locations:
+                continue
+            elif candidate_loc >= min_doc_len and candidate_loc < max_doc_len:
+                already_locations.append(candidate_loc)
+                continue
+        # if the queue is empty
         sel_idx = top_indicies[cursor]
         cursor += 1
         if sel_idx > max_doc_len:
             continue
         left, right = max(
-            min_doc_len, sel_idx-ctx_window), min(sel_idx + ctx_window, max_doc_len)
+            min_doc_len, sel_idx-ctx_window), min(sel_idx + ctx_window+1, max_doc_len)
+        queue.append(sel_idx)
         for idx in range(left, right):
-            selected_tokens[idx] = mask_token_id
-        sel_budget -= 1
+            queue.append(idx)
         if cursor >= len(top_indicies):
             break
+    for loc in already_locations:
+        selected_tokens[loc] = mask_token_id
     return selected_tokens
 
 
@@ -270,13 +309,13 @@ def assemble_units(rendered_tokens, step_data, t, bud, eval_mode, uid):
 
 def process_occlusion(task_output):
     output = task_output['output']
-    if isinstance(output[0],list):
-        output = [ [1- x for x in one] for one in output]
+    if isinstance(output[0], list):
+        output = [[1 - x for x in one] for one in output]
         task_output['output'] = output
         return task_output
-    for idx, out in enumerate(output) :
+    for idx, out in enumerate(output):
         inner_out = out['output']
-        inner_out = [ 1-x for x in inner_out]
+        inner_out = [1-x for x in inner_out]
         output[idx]['output'] = inner_out
 
     task_output['output'] = output

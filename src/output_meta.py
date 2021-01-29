@@ -1,4 +1,5 @@
 # Add labels
+from multiprocessing import Pool
 import nltk
 from nltk.corpus import stopwords
 from helper import *
@@ -102,9 +103,9 @@ def categorize(step_data, tokenizer):
     }
 
 
-def example_print(step_data, tokenizer):
+def example_print(step,meta_data,tokenizer):
     viz_dict = {}
-    for k, v in step_data.items():
+    for k, v in step.items():
         if isinstance(v, torch.Tensor):
             continue
         elif isinstance(v, float):
@@ -149,6 +150,24 @@ def example_print(step_data, tokenizer):
     return viz_dict
 
 
+tokenizer = BartTokenizer.from_pretrained('facebook/bart-large')
+
+
+def process_one(dir_base, dir_meta, f):
+    print(dir_base, dir_meta, f)
+    output_base = load_pickle(dir_base, f)
+    step_data, meta_data = read_meta_data(dir_meta, f)
+    all_data = []
+    for t, step in enumerate(output_base):
+        out = example_print(step,meta_data, tokenizer)
+        out['id'] = f
+        keys = list(out.keys())
+        values = list(out.values())
+        d = pd.DataFrame([values], columns=keys)
+        all_data.append(d)
+    return all_data
+
+
 if __name__ == "__main__":
     parser = common_args()
     args = parser.parse_args()
@@ -157,14 +176,17 @@ if __name__ == "__main__":
     dir_meta = args.dir_meta
     dir_eval_save = args.dir_eval_save
     dir_base = args.dir_base
-    files = os.listdir(dir_eval_save)
+
+    files = os.listdir(dir_base)
 
     # occ_files = os.listdir('/mnt/data0/jcxu/task_occ_xsum_0.5')
     print(dir_eval_save)
     files_meta = os.listdir(dir_meta)
     # files = [f for f in files if f in occ_files]
-    files = [f for f in files]
+
     print(len(files))
+    random.shuffle(files)
+    # files = files[:100]
     cnt = 0
     fusion = 0
     lm = 0
@@ -172,7 +194,6 @@ if __name__ == "__main__":
     ctx_easy = 0
     fusion_ys = []
     all_ys = []
-    tokenizer = BartTokenizer.from_pretrained('facebook/bart-large')
     dict_bud = {}
     all_dists = {}
     tags = ['fusion', 'novel', 'lm', 'ctx', 'hard', 'all']
@@ -181,77 +202,22 @@ if __name__ == "__main__":
         all_dists[tag] = {}
     dir_latex = '/mnt/data0/jcxu/latex'
     all_data = []
-    for f in files:
-        eval_pkg = load_pickle(dir_eval_save, f)
-        output_base = load_pickle(dir_base, f)
+    inps = [(dir_base, dir_meta, f) for f in files]
+    with Pool(multiprocessing.cpu_count()) as p:
+        result = p.starmap(process_one, inps)
+    # for idx, f in enumerate(files):
+    #     print(idx)
+    #     output_base = load_pickle(dir_base, f)
+    #     step_data, meta_data = read_meta_data(dir_meta, f)
+    #     for t, step in enumerate(output_base):
 
-        if len(output_base) !=len(eval_pkg):
-            continue
-        step_data, meta_data = read_meta_data(dir_meta, f)
-        for t, step in enumerate(output_base):
-            cat_dict = categorize(step, tokenizer)
-            eval_content = eval_pkg[t]
-            meta, loss = eval_content['meta'], eval_content['loss']
-            for met, los in zip(meta, loss):
-                # mode = met['mode']
-                bud = met['bud']
-                for tag in tags:
-                    flag = cat_dict[tag]
-                    if not flag:
-                        continue
-                    if bud in all_dists[tag]:
-                        all_dists[tag][bud].append(los)
-                    else:
-                        all_dists[tag][bud] = [los]
-
-            out = example_print(step, tokenizer)
-            keys = list(out.keys())
-            values = list(out.values())
-            d = pd.DataFrame([values], columns=keys)
-            all_data.append(d)
-
-
-    df = pd.concat(all_data, ignore_index=True)
+    #         out = example_print(step, tokenizer)
+    #         out['id'] = f
+    #         keys = list(out.keys())
+    #         values = list(out.values())
+    #         d = pd.DataFrame([values], columns=keys)
+    #         all_data.append(d)
+    flatten = lambda t: [item for sublist in t for item in sublist]
+    final_result = flatten(result)
+    df = pd.concat(final_result, ignore_index=True)
     df.to_csv(path_or_buf=f"{args.dir_stat}/viz.csv", index=True)
-
-    # write_latex
-    task = args.task
-    eval_mode = args.eval_mode
-    for tag in tags:
-        fname = f"{eval_mode}_{args.sent_pre_sel}_{tag}.tex"
-        latex_file = os.path.join(dir_latex, fname)
-        cur_dict = all_dists[tag]
-        keys = list(cur_dict.keys())
-        values = list(cur_dict.values())
-        values = [statistics.mean(v) for v in values]
-        keys_str = "".join([f"\t {k}" for k in keys]) + '\n'
-        values_str = "".join([f"\t { pnum(v)}" for v in values]) + '\n'
-        print(keys_str)
-        print(values_str)
-        final_str = f"{task} {values_str}"
-        if not os.path.exists(latex_file):
-            with open(latex_file, 'w') as fd:
-                fd.write(keys_str)
-                fd.write(final_str)
-
-            continue
-        with open(latex_file, 'r') as fd:
-            lines = fd.read().splitlines()
-        anyexist = any([task in l for l in lines])
-        if anyexist:
-            head = lines[0]
-            content = lines[1:]
-            new_content = []
-            for l in content:
-                if task in l:
-                    new_content.append(final_str)
-                else:
-                    new_content.append(l+'\n')
-
-            with open(latex_file, 'w') as fd:
-                fd.write(head+'\n')
-                for ct in new_content:
-                    fd.write(ct)
-        else:
-            with open(latex_file, 'a') as fd:
-                fd.write(final_str)

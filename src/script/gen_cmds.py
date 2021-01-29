@@ -8,12 +8,12 @@ import random
 import random
 tasks = ['int_grad', 'inp_grad', 'random', 'lead', 'occ', 'attn']
 random.shuffle(tasks)
-# settings = ['rm_sent'] 
-settings = ['sel_tok', 'rm_tok', 'sel_sent', 'rm_sent'] 
+settings = ['sel_tok'] 
+# settings = ['sel_tok', 'rm_tok', 'sel_sent', 'rm_sent'] 
 for task in tasks:
     for setting in settings:
         gpuid = random.randint(0, 3)
-        print(f"python evaluation.py -task={task}  -eval_mode={setting} -device=cuda:{gpuid}")
+        # print(f"python evaluation.py -task={task}  -eval_mode={setting} -device=cuda:{gpuid}")
         print(f"python post_eval.py -task={task} -eval_mode={setting}")
         # print()
     print()
