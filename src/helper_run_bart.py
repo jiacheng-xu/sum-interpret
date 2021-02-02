@@ -167,7 +167,7 @@ def run_full_model_slim(model, input_ids, attention_mask=None, decoder_input_ids
             outputs['cross_attentions'], input_ids, device=device)
         return output, p
 
-        
+    
     prob = torch.nn.functional.softmax(next_token_logits/T, dim=-1)
     # prob = next_token_logits.softmax(dim=-1)
     next_token = torch.argmax(next_token_logits, dim=-1)

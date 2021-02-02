@@ -25,7 +25,7 @@ cat = ['none']
 
 
 def show_quantiles(var):
-    print([round(q, 1) for q in quantiles(var, n=10)])
+    print([round(q, 2) for q in quantiles(var, n=4)])
 
 
 def load_csv(fname_w_dir):
@@ -120,8 +120,8 @@ def process_one_pack(data_pack, keys, xaxis_name):
 
 
 def draw_map_figure(x, y, pert_v, pert_max, delta, map_name, xaxis_name, label_name, label_values):
-    xlabel = r'$d$(LM, FULL)'
-    ylabel = r'$d$(LM-FT, FULL)'
+    xlabel = r'$d(LM_{\emptyset}, S_{full})$'
+    ylabel = r'$d(S_{\emptyset}, S_{full})$'
     style = ['o', '+']
     if label_name == 'none':
         labels = []
@@ -131,17 +131,24 @@ def draw_map_figure(x, y, pert_v, pert_max, delta, map_name, xaxis_name, label_n
         LM = "LM"
         Other = "Other"
         for a, b, c, d, change in zip(x, y, pert_v, pert_max, delta):
-            if c < 0.3 and d > 0.6:
-                l = LM
-            elif c < 0.5 and d < 0.3:
+            # if c < 0.3 and d > 0.6:
+            #     l = LM
+            #     l = Other
+            # elif c < 0.5 and d < 0.3:
+            #     l = CNT_HD
+            # elif c > 0.5 and d > 0.6:
+            #     l = CNT_EZ
+            #     l = Other
+            # else:
+            #     l = Other
+            if d < 0.5 and a > 0.5 and b > 0.5:
                 l = CNT_HD
-            elif c > 0.5 and d > 0.6:
-                l = CNT_EZ
             else:
                 l = Other
 
             labels.append(l)
         plat = colors[: len(set(labels))]
+        plat = [colors[0]] + ['gray']
     else:
         labels = label_values
         plat = colors[:2]
@@ -178,34 +185,36 @@ def draw_map_figure(x, y, pert_v, pert_max, delta, map_name, xaxis_name, label_n
     #     oa = [a for a, b, c in zip(x, y, labels) if c == en]
     #     ob = [b for a, b, c in zip(x, y, labels) if c == en]
     #     scatter = ax.scatter(oa, ob, s=s, marker='o', label=str(en), alpha=0.5,edgecolors='none')
-    hue_order = [LM, CNT_EZ,CNT_HD,Other]
+    hue_order = [LM, CNT_EZ, CNT_HD, Other]
+    hue_order = [CNT_HD, Other]
+    sns.set_context("paper")
     g = sns.JointGrid(data=df, x=xlabel, y=ylabel,
-                      hue='label',  palette=plat, height=4,hue_order=hue_order)
+                      hue='label',  palette=plat, height=4, hue_order=hue_order)
     # g.fig.set_size_inches(3,3)
-    lm_color = colors[0]
-    ctx_color = colors[1]
+    lm_color = colors[3]
+    ctx_color = colors[2]
     c_ctx_easy = ctx_color
-    c_ctx_hd = colors[2]
-    c_other = colors[3]
+
+    # c_other = colors[1]
+    c_other = 'gray'
     pt_color = colors[4]
     td_color = colors[5]
+
+    c_ctx_hd = colors[0]
+
     import matplotlib.patches as mpatches
     import matplotlib.lines as mlines
     mk_size = 6
-    # ez_patch = mpatches.Patch(color=plat[0], label=CNT_EZ)
-    ez_patch = mlines.Line2D([], [], color=c_ctx_easy, marker='o',
-                             linestyle='None', markersize=mk_size, label=CNT_EZ)
+    label_text_size = 12
+    # ez_patch = mlines.Line2D([], [], color=c_ctx_easy, marker='o',linestyle='None', markersize=mk_size, label=CNT_EZ)
 
-    # hd_patch = mpatches.Patch(color=plat[1], label=CNT_HD)
-    hd_patch = mlines.Line2D([], [], color=c_ctx_hd, marker='o', linestyle='None',
+    hd_patch = mlines.Line2D([], [], color=c_ctx_hd, marker='+', linestyle='None',
                              markersize=mk_size, label=CNT_HD)
-    # lm_patch = mpatches.Patch(color=plat[2], label=LM)
-    lm_patch = mlines.Line2D([], [], color=lm_color, marker='o', linestyle='None',
-                             markersize=mk_size, label=LM)
-    other_path = mlines.Line2D([], [], color=c_other, marker='o', linestyle='None',
-                               markersize=mk_size, label=Other)
+
+    # lm_patch = mlines.Line2D([], [], color=lm_color, marker='o', linestyle='None',markersize=mk_size, label=LM)
+    # other_path = mlines.Line2D([], [], color=c_other, marker='o', linestyle='None',markersize=mk_size, label=Other)
     g.plot_joint(sns.scatterplot, s=s, alpha=.5, edgecolors='none',
-                  legend=False,
+                 legend=False,
                  style=stys
                  )
     # g.plot_joint(sns.scatterplot, s=s, alpha=.5,
@@ -223,30 +232,55 @@ def draw_map_figure(x, y, pert_v, pert_max, delta, map_name, xaxis_name, label_n
     # VMa = [a for a,b,c in zip(x,y,labels) if c == CNT_EZ]
     # VMb = [b for a,b,c in zip(x,y,labels) if c == CNT_EZ]
     # scatter = ax.scatter(VMa, VMb, marker='+',s=s, label=CNT_EZ)
-
+    line_alpha = 0.5
+    lw = 1
     g.ax_joint.fill_between([0.5, 2], [0.5, 0.5], [
-                            2, 2], color=ctx_color, alpha=0.1, edgecolor='none', lw=0)  # Context
+                            2, 2],  color='none', edgecolor=ctx_color, alpha=line_alpha, lw=lw)  # Context
+
     g.ax_joint.fill_between([0, 0.5], [0., 0.0], [
-                            0.5, 0.5], color=lm_color, alpha=0.1, edgecolor='none', lw=0)  # LM
+                            0.5, 0.5], color='none', alpha=line_alpha, edgecolor=lm_color, lw=lw)  # LM
     g.ax_joint.fill_between([0, 0.5], [1.5, 1.5], [
-                            2, 2], color=pt_color, alpha=0.1, edgecolor='none', lw=0)  # PT
+                            2, 2], color='none', alpha=line_alpha, edgecolor=pt_color, lw=lw)  # PT
     g.ax_joint.fill_between([1.5, 2], [0., 0.0], [
-                            0.5, 0.5], color=td_color, alpha=0.1, edgecolor='none', lw=0)  # TD
-    g.ax_joint.annotate('CT', xy=(2, 2), xytext=(1.2, 1.2), color=ctx_color,
-                        # arrowprops=dict(facecolor='none', shrink=0.05),
-                        )
-    g.ax_joint.annotate('PT', xy=(2, 2), xytext=(0.2, 1.7), color=pt_color,
-                        # arrowprops=dict(facecolor='black', shrink=0.05),
-                        )
-    g.ax_joint.annotate('TD', xy=(2, 2), xytext=(1.7, 0.2), color=td_color,
-                        # arrowprops=dict(facecolor='black', shrink=0.05),
-                        )
-    g.ax_joint.annotate('LM', xy=(0.25, 0.25), xytext=(0.2, 0.2), color=lm_color,
-                        # arrowprops=dict(facecolor='none', shrink=0.05),
-                        )
-    bbox_to_anchor = (-7.5, 1.25)
-    plt.legend(handles=[lm_patch, ez_patch, hd_patch, other_path], loc='upper left',
-               ncol=4, bbox_to_anchor=bbox_to_anchor, handletextpad=0, columnspacing=0.2)
+                            0.5, 0.5], color='none', alpha=line_alpha, edgecolor=td_color, lw=lw)  # TD
+
+    g.ax_joint.text(1.25, 1.25, 'Context',
+                    horizontalalignment='center',
+                    verticalalignment='center',
+                    fontsize=label_text_size, color=ctx_color,
+                    )
+    g.ax_joint.text(0.25, 1.75, 'PT',
+                    horizontalalignment='center',
+                    verticalalignment='center',
+                    fontsize=label_text_size, color=pt_color,
+                    )
+    g.ax_joint.text(1.75, 0.25, 'FT',
+                    horizontalalignment='center',
+                    verticalalignment='center',
+                    fontsize=label_text_size, color=td_color,
+                    )
+    g.ax_joint.text(0.25, 0.25, 'LM',
+                    horizontalalignment='center',
+                    verticalalignment='center',
+                    fontsize=label_text_size, color=lm_color,
+                    )
+    # g.ax_joint.text(0., 0., 'LM',
+    #                 horizontalalignment='center',
+    #                 verticalalignment='center',
+    #                 fontsize=18, color=lm_color)
+    # g.ax_joint.annotate('PT', xy=(2, 2), xytext=(0.2, 1.7), color=pt_color,
+    # arrowprops=dict(facecolor='black', shrink=0.05),
+    # )
+    # g.ax_joint.annotate('TrainData', xy=(2, 2), xytext=(1.7, 0.2), color=td_color,
+    #                     # arrowprops=dict(facecolor='black', shrink=0.05),
+    #                     )
+    # g.ax_joint.annotate('LM', xy=(0.25, 0.25), xytext=(0.2, 0.2), color=lm_color,
+    #                     # arrowprops=dict(facecolor='none', shrink=0.05),
+    #                     )
+    bbox_to_anchor = (-4.5, 1.25)
+    # plt.legend(handles=[lm_patch, ez_patch, hd_patch, other_path], loc='upper left',ncol=4, bbox_to_anchor=bbox_to_anchor, handletextpad=0, columnspacing=0.2)
+    plt.legend(handles=[hd_patch], loc='upper left', ncol=1,
+               bbox_to_anchor=bbox_to_anchor, handletextpad=0, columnspacing=0.2)
     # g.legend(handles=[lm_patch, ez_patch, hd_patch], loc='best', ncol=3,
     #  bbox_to_anchor=bbox_to_anchor,
     #  handletextpad=0.1
@@ -288,6 +322,8 @@ if __name__ == "__main__":
     data = read_out[1:]
     if debug:
         data = data[:300]
+    max_count = 3800
+    cnt = 0
     X, Y, Var, Max = [], [], [], []
     delta = []
     cat_k, cat_v = [], []
@@ -306,12 +342,16 @@ if __name__ == "__main__":
             delta.append(pert_delta)
             cat_k = cat_keys
             cat_v.append(cat_vals)
+            cnt+=1
+            if cnt>max_count:
+                break
         except TypeError:
             pass
     show_quantiles(X)
     show_quantiles(Y)
     show_quantiles(Var)
     show_quantiles(Max)
+    print(cnt)
     for label in cat:
         name_of_map = f"map_{args.data_name}_{label}_{xaxis}.pdf"
         draw_map_figure(X, Y, Var, Max, delta, name_of_map, xaxis, label, None)

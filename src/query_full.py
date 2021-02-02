@@ -117,17 +117,23 @@ def process_one_pack(data_pack, keys, xaxis_name):
 
 
 def query_func(data_base: str, texts: List[str]):
+    prefixs = [word.split(" ")[0]+" " for word in texts]
+    prefix_cnts = [data_base.count(x) for x in prefixs]
     cnts = [data_base.count(f"{word}") for word in texts]
-    print(statistics.mean(cnts))
-    return statistics.mean(cnts),cnts
+    returns = []
+    for r, t in zip(prefix_cnts, cnts):
+        if r < 1:
+            continue
+        returns.append(t)
+    return returns
 
 
 if __name__ == "__main__":
-    debug = False
+    debug = True
     # fname = '/mnt/data0/jcxu/output_file.csv'
     fname = '/mnt/data0/jcxu/csv_xsum/meta.csv'
     # fname = '/mnt/data0/jcxu/output_file_test.csv'
-    fname = '/mnt/data0/jcxu/csv_xsum/viz_t_0.5.csv'
+    fname = '/mnt/data0/jcxu/csv_xsum_0.5/viz.csv'
     read_out = load_csv(fname)
     xaxis = 'lm_full'
     # xaxis = 'lm_imp'
@@ -151,7 +157,7 @@ if __name__ == "__main__":
     key = read_out[0]
     data = read_out[1:]
     if debug:
-        data = data[:100]
+        data = data[:5000]
     X, Y, Var, Max = [], [], [], []
     Q = []
     cat_k, cat_v = [], []
@@ -168,26 +174,29 @@ if __name__ == "__main__":
             Q.append(query)
         except TypeError:
             pass
-    print(f"Num char: {len(cnndm_s)}")
-    print(f"Num char: {len(xsum_s)}")
+    # print(f"Num char: {len(cnndm_s)}")
+    # print(f"Num char: {len(xsum_s)}")
     # lm
     lms = [c for a, b, c in zip(X, Y, Q) if a < 0.5 and b < 0.5]
     bias = [c for a, b, c in zip(X, Y, Q) if a > 1.5 and b < 0.5]
-    ctx = [c for a, b, c in zip(X, Y, Q) if b> 0.5]
-    
+    pt_bias = [c for a, b, c in zip(X, Y, Q) if a < 0.5 and b > 1.5]
+    ctx = [c for a, b, c in zip(X, Y, Q) if b > 0.5 and a>0.5]
+    bag= []
     # query_func(cnndm_s,lms)
-    _,bias_cnndm = query_func(cnndm_s,bias)
-    # query_func(xsum_s,lms)
-    _, bias_xsum = query_func(xsum_s,bias)
-    for e,r,t in zip(bias_cnndm, bias_xsum,bias):
-        try:
-            if e/r < 0.01:
-                print(f"{t}\t{e} {r}\t{pnum(e/r)}")
-        except ZeroDivisionError:
-            continue
-
-
-
-
-    # query_func(cnndm_s,ctx)
-    # query_func(xsum_s,ctx)
+    # app_set = lms
+    # cnn_result = query_func(cnndm_s, app_set)
+    # xsum_result = query_func(xsum_s, app_set)
+    # bag.append(f"{statistics.mean(cnn_result)}\t{statistics.mean(xsum_result)}")
+    app_set = bias
+    cnn_result = query_func(cnndm_s, app_set)
+    xsum_result = query_func(xsum_s, app_set)
+    bag.append(f"{statistics.mean(cnn_result)}\t{statistics.mean(xsum_result)}")
+    # app_set = pt_bias
+    # cnn_result = query_func(cnndm_s, app_set)
+    # xsum_result = query_func(xsum_s, app_set)
+    # bag.append(f"{statistics.mean(cnn_result)}\t{statistics.mean(xsum_result)}")
+    # app_set = ctx
+    # cnn_result = query_func(cnndm_s, app_set)
+    # xsum_result = query_func(xsum_s, app_set)
+    # bag.append(f"{statistics.mean(cnn_result)}\t{statistics.mean(xsum_result)}")
+    print("\n".join(bag))

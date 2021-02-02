@@ -157,15 +157,17 @@ if __name__ == "__main__":
     logger.info("Done loading BARTs.")
     model_pkg = {'sum': model_sum, 'tok': tokenizer}
     all_files = os.listdir(args.dir_base)
+    all_files = ['34832755.pkl','37267397.pkl']+ all_files
     for f in all_files:
         outputs = []
         step_data, meta_data = read_meta_data(args.dir_meta, f)
 
-        output_base_data = load_pickle(args.dir_base, f)
         exist = check_exist_file(args.dir_task, f)
         if exist:
             logger.debug(f"{f} already exists")
             continue
+        print('work')
+        output_base_data = load_pickle(args.dir_base, f)
         uid = meta_data['id']
         sent_token_ids = meta_data['sent_token_ids']
         acc_duration = 0

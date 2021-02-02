@@ -11,7 +11,7 @@ def run_eval(model_sum, data_feeder):
     result_bag = []
     for data_stream in data_feeder:
         input_ids, attn_masks, gather_prefix, gather_tgt, gather_metas = data_stream
-        output_tok, _, _, loss = run_full_model_slim(
+        output_tok, prob, logits, loss = run_full_model_slim(
             model_sum,
             input_ids=input_ids,
             attention_mask=attn_masks,
@@ -20,7 +20,8 @@ def run_eval(model_sum, data_feeder):
             device=device)
         loss = loss.tolist()
         result_bag.append({'loss': loss,
-                           'meta': gather_metas})
+                           'meta': gather_metas,
+                           'prob':prob,'logit':logits})
     return result_bag
 
 

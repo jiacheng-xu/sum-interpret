@@ -25,30 +25,37 @@ with open(p, 'r') as fd:
 
 lines = [l.split('\t')[1] for l in lines]
 print(lines[0])
-s = "\n".join(lines)
-print(f"Num char: {len(s)}")
-cnts = [ s.count(f"{word}") for word in stp]
+cnndm_string = "\n".join(lines)
+print(len(cnndm_string.split(" ")))
+# print(f"Num char: {len(s)}")
+# cnts = [ s.count(f"{word}") for word in stp]
 
-print(statistics.mean(cnts))
+# print(statistics.mean(cnts))
 
 with open(q, 'r') as fd:
     lines = fd.read().splitlines()
     lines = [l for l in lines]
 lines = [l.split('\t')[1] for l in lines]
 print(lines[0])
-s = "\n".join(lines)
-print(f"Num char: {len(s)}")
-cnts = [ s.count(f"{word}") for word in stp]
-import statistics
-print(statistics.mean(cnts))
+xsum_string = "\n".join(lines)
+print(len(xsum_string.split(" ")))
+# print(f"Num char: {len(s)}")
+# cnts = [ s.count(f"{word}") for word in stp]
+# import statistics
+# print(statistics.mean(cnts))
 
-exit()
+# exit()
 while True:
     k = input("Input query!")
-    cnt = s.count(k)
+    cnndm_cnt = cnndm_string.count(k)
+    xsum_cnt = xsum_string.count(k)
+
     toks = k.split(" ")
     toks = toks[:-1]
     newtok = " ".join(toks)
-    newcnt = s.count(newtok)
-    print(f"{k} shows {cnt} times")
-    print(f"{newtok} shows {newcnt} times")
+    print(newtok)
+
+    cnndm_prefix_cnt = cnndm_string.count(newtok)
+    xsum_prefix_cnt = xsum_string.count(newtok)
+    print(f"{xsum_cnt},{xsum_prefix_cnt},{cnndm_cnt},{cnndm_prefix_cnt}")
+
