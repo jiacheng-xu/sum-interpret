@@ -44,6 +44,8 @@ def extract_from_task_output(task_output, meta_data, step_data, args, budget: Li
             rendered_tokens, step_data, t, bud, eval_mode, uid)
         return_data.append(unit)
     return return_data
+
+
 if __name__ == "__main__":
 
     debug = False
@@ -81,7 +83,7 @@ if __name__ == "__main__":
                     continue
                 output_base_data = load_pickle(args.dir_base, f)
                 step_data, meta_data = read_meta_data(args.dir_meta, f)
-                if args.task in ['int_grad', 'inp_grad', 'occ', 'int_grad_sent_sel', 'inp_grad_sent_sel', 'occ_sent_sel','attn','attn_sent_sel']:
+                if args.task in ['int_grad', 'inp_grad', 'occ', 'int_grad_sent_sel', 'inp_grad_sent_sel', 'occ_sent_sel', 'attn', 'attn_sent_sel']:
                     task_output = load_pickle(args.dir_task, f)
                     pack_data_inp = extract_from_task_output(
                         task_output, meta_data, step_data, args, budget_ig, device)
@@ -94,6 +96,6 @@ if __name__ == "__main__":
                 continue
             # write evaluation output to disk to reuse
             all_result += this_result
-            
+
     except KeyboardInterrupt:
         logger.info(f"Done {len(all_result)}")

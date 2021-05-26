@@ -1,3 +1,4 @@
+from multiprocessing import Pool
 import multiprocessing
 import pickle
 from nltk.tokenize.treebank import TreebankWordDetokenizer
@@ -43,7 +44,7 @@ def run(idx, data_point, path, split_name):
         'document': xsum_style_doc,
         'summary': ref
     }
-from multiprocessing import Pool
+
 
 if __name__ == "__main__":
     from datasets import load_dataset

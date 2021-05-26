@@ -136,3 +136,8 @@ dmypy.json
 *.log
 *.json
 *.txt
+data/CNN_CC_2016
+data/delta_2014_2015
+data/dm_2014
+data/dm_2015
+data/DM_CC_2016

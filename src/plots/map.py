@@ -342,8 +342,8 @@ if __name__ == "__main__":
             delta.append(pert_delta)
             cat_k = cat_keys
             cat_v.append(cat_vals)
-            cnt+=1
-            if cnt>max_count:
+            cnt += 1
+            if cnt > max_count:
                 break
         except TypeError:
             pass

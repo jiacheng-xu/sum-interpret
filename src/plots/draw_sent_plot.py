@@ -26,5 +26,4 @@ data = pd.DataFrame(values, dates, columns=["A", "B", "C", "D"])
 data = data.rolling(7).mean()
 
 sns.lineplot(data=data, palette="tab10", linewidth=2.5)
-
 sns.lineplot()

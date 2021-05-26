@@ -13,7 +13,6 @@ python input_grad.py -task='inp_grad' -sent_pre_sel -device='cuda:0'
 python input_grad.py -task='inp_grad'  -device='cuda:0'
 
 
-
 python attn.py -task='attn'  -device='cuda:1'  -sent_pre_sel 
 
 
